@@ -1,0 +1,5 @@
+---
+keepalived_state: BACKUP
+keepalived_priority: 100
+keepalived_src_ip: 10.20.20.12
+keepalived_peer_ip: 10.20.20.11

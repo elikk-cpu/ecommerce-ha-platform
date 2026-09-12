@@ -1,0 +1,15 @@
+---
+haproxy_vip: 10.20.20.100
+haproxy_frontend_port: 80
+
+haproxy_backends:
+  - name: app1
+    address: 10.30.30.21
+    port: 8000
+
+  - name: app2
+    address: 10.30.30.22
+    port: 8000
+
+keepalived_interface: ens37
+keepalived_virtual_router_id: 51

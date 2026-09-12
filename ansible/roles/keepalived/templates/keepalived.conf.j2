@@ -1,0 +1,42 @@
+global_defs {
+    router_id {{ inventory_hostname }}
+    enable_script_security
+}
+
+vrrp_script chk_haproxy {
+    script "/usr/local/bin/check_haproxy.sh"
+    interval 2
+    timeout 2
+    fall 2
+    rise 2
+    weight -60
+    user root
+}
+
+vrrp_instance VI_ECOMMERCE {
+    state {{ keepalived_state }}
+    interface {{ keepalived_interface }}
+
+    virtual_router_id {{ keepalived_virtual_router_id }}
+    priority {{ keepalived_priority }}
+    advert_int 1
+
+    unicast_src_ip {{ keepalived_src_ip }}
+
+    unicast_peer {
+        {{ keepalived_peer_ip }}
+    }
+
+    authentication {
+        auth_type PASS
+        auth_pass ecomha01
+    }
+
+    virtual_ipaddress {
+        {{ haproxy_vip }}/24 dev {{ keepalived_interface }}
+    }
+
+    track_script {
+        chk_haproxy
+    }
+}
