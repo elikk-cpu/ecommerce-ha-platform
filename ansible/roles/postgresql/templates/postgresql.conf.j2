@@ -1,9 +1,0 @@
-listen_addresses = 'localhost,{{ postgresql_primary_ip }}'
-port = {{ postgresql_port }}
-
-wal_level = replica
-max_wal_senders = 10
-max_replication_slots = 10
-wal_keep_size = 256MB
-
-hot_standby = on
