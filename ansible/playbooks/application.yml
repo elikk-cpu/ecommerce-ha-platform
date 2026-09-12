@@ -1,0 +1,8 @@
+---
+- name: Deploy ecommerce application
+  hosts: apps
+  become: true
+
+  roles:
+    - docker
+    - application

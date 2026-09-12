@@ -1,0 +1,39 @@
+- name: Install Docker
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - python3-docker
+    state: present
+    update_cache: true
+
+- name: Prefer IPv4 over IPv6
+  ansible.builtin.lineinfile:
+    path: /etc/gai.conf
+    regexp: '^#?precedence ::ffff:0:0/96'
+    line: 'precedence ::ffff:0:0/96  100'
+    state: present
+  notify: Restart Docker
+
+- name: Disable IPv6 on Docker application nodes
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: "1"
+    state: present
+    sysctl_set: true
+    reload: true
+  loop:
+    - net.ipv6.conf.all.disable_ipv6
+    - net.ipv6.conf.default.disable_ipv6
+  notify: Restart Docker
+
+- name: Ensure Docker is enabled and running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Add aa user to docker group
+  ansible.builtin.user:
+    name: aa
+    groups: docker
+    append: true

@@ -1,0 +1,23 @@
+---
+- name: Rebuild application
+  community.docker.docker_image:
+    name: ecommerce-api
+    tag: local
+    source: build
+    build:
+      path: /opt/ecommerce/app
+    force_source: true
+  notify: Restart application
+
+- name: Restart application
+  community.docker.docker_container:
+    name: ecommerce-api
+    image: ecommerce-api:local
+    hostname: "{{ inventory_hostname }}"
+    state: started
+    restart: true
+    restart_policy: unless-stopped
+    ports:
+      - "{{ app_bind_ip }}:8000:8000"
+    env:
+      APP_ENV: production

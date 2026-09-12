@@ -4,3 +4,5 @@
 - import_playbook: ssh-baseline.yml
 - import_playbook: haproxy.yml
 - import_playbook: keepalived.yml
+- import_playbook: docker.yml
+- import_playbook: application.yml

@@ -1,0 +1,7 @@
+---
+- name: Install Docker on application nodes
+  hosts: apps
+  become: true
+
+  roles:
+    - docker
