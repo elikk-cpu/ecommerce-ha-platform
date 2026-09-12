@@ -1,0 +1,62 @@
+---
+- name: Install Redis server packages
+  ansible.builtin.apt:
+    name:
+      - redis-server
+      - redis-tools
+    state: present
+    update_cache: true
+  when: inventory_hostname in groups['redis']
+
+- name: Install Redis Sentinel
+  ansible.builtin.apt:
+    name:
+      - redis-sentinel
+      - redis-tools
+    state: present
+    update_cache: true
+  when: inventory_hostname in groups['redis_sentinels']
+
+- name: Ensure Redis server is enabled and running
+  ansible.builtin.service:
+    name: redis-server
+    state: started
+    enabled: true
+  when: inventory_hostname in groups['redis']
+
+- name: Ensure Redis Sentinel is enabled and running
+  ansible.builtin.service:
+    name: redis-sentinel
+    state: started
+    enabled: true
+  when: inventory_hostname in groups['redis_sentinels']
+
+- name: Deploy Redis Primary configuration
+  ansible.builtin.template:
+    src: redis-primary.conf.j2
+    dest: /etc/redis/redis.conf
+    owner: redis
+    group: redis
+    mode: "0640"
+  when: inventory_hostname == redis_primary_host
+  notify: Restart Redis
+
+- name: Deploy Redis Replica configuration
+  ansible.builtin.template:
+    src: redis-replica.conf.j2
+    dest: /etc/redis/redis.conf
+    owner: redis
+    group: redis
+    mode: "0640"
+  when: inventory_hostname == redis_replica_host
+  notify: Restart Redis
+
+- name: Deploy Redis Sentinel configuration
+  ansible.builtin.template:
+    src: sentinel.conf.j2
+    dest: /etc/redis/sentinel.conf
+    owner: redis
+    group: redis
+    mode: "0640"
+  when: inventory_hostname in groups['redis_sentinels']
+  notify: Restart Redis Sentinel

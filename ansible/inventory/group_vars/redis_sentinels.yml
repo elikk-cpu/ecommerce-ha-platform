@@ -1,0 +1,21 @@
+---
+redis_port: 6379
+
+redis_primary_host: redis2
+redis_primary_ip: 10.40.40.42
+
+redis_replica_host: redis1
+redis_replica_ip: 10.40.40.41
+
+redis_sentinel_master_name: ecommerce-master
+redis_sentinel_quorum: 2
+
+redis_sentinel_ips:
+  redis1: 10.40.40.41
+  redis2: 10.40.40.42
+  rabbit3: 10.40.40.53
+
+redis_sentinel_port: 26379
+redis_sentinel_down_after_ms: 5000
+redis_sentinel_failover_timeout: 60000
+redis_sentinel_parallel_syncs: 1

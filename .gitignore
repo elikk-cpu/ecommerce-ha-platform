@@ -22,3 +22,4 @@ Thumbs.db
 
 # Ansible secrets
 ansible/vars/postgresql-vault.yml
+ansible/vars/redis-vault.yml

@@ -1,0 +1,17 @@
+port {{ redis_sentinel_port }}
+
+bind 127.0.0.1 {{ redis_sentinel_ips[inventory_hostname] }}
+protected-mode no
+
+daemonize no
+supervised systemd
+
+dir /var/lib/redis
+
+sentinel monitor {{ redis_sentinel_master_name }} {{ redis_primary_ip }} {{ redis_port }} {{ redis_sentinel_quorum }}
+
+sentinel auth-pass {{ redis_sentinel_master_name }} {{ vault_redis_password }}
+
+sentinel down-after-milliseconds {{ redis_sentinel_master_name }} {{ redis_sentinel_down_after_ms }}
+sentinel failover-timeout {{ redis_sentinel_master_name }} {{ redis_sentinel_failover_timeout }}
+sentinel parallel-syncs {{ redis_sentinel_master_name }} {{ redis_sentinel_parallel_syncs }}

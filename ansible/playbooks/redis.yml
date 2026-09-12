@@ -1,0 +1,10 @@
+---
+- name: Configure Redis HA nodes
+  hosts: redis_sentinels
+  become: true
+
+  vars_files:
+    - ../vars/redis-vault.yml
+
+  roles:
+    - redis_ha
