@@ -1,0 +1,11 @@
+---
+- name: Install Windows SSH key on internal hosts
+  hosts: internal
+  gather_facts: false
+
+  tasks:
+    - name: Add Windows public SSH key for aa
+      ansible.posix.authorized_key:
+        user: aa
+        state: present
+        key: "{{ lookup('file', '/tmp/ecommerce-ha-ed25519.pub') }}"

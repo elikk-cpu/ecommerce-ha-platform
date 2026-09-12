@@ -1,0 +1,21 @@
+---
+- name: Configure management gateway and internal DNS
+  ansible.builtin.copy:
+    dest: /etc/netplan/99-mgmt-gateway.yaml
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      network:
+        version: 2
+        ethernets:
+          ens33:
+            routes:
+              - to: default
+                via: {{ management_gateway }}
+            nameservers:
+              addresses:
+      {% for dns in internal_dns %}
+                - {{ dns }}
+      {% endfor %}
+  notify: Apply netplan

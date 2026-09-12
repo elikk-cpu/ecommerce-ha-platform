@@ -1,0 +1,4 @@
+---
+- import_playbook: common.yml
+- import_playbook: network.yml
+- import_playbook: ssh-baseline.yml

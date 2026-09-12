@@ -1,0 +1,7 @@
+---
+- name: Configure internal network
+  hosts: "internal:!db1"
+  become: true
+
+  roles:
+    - network

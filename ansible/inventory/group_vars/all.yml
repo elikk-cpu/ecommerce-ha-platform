@@ -1,0 +1,25 @@
+---
+timezone: Etc/UTC
+
+management_gateway: 10.10.10.254
+internal_dns:
+  - 10.10.10.254
+
+common_packages:
+  - curl
+  - wget
+  - vim
+  - nano
+  - git
+  - htop
+  - net-tools
+  - dnsutils
+  - traceroute
+  - tcpdump
+  - jq
+  - unzip
+  - ca-certificates
+  - gnupg
+  - rsync
+  - chrony
+  - open-vm-tools
