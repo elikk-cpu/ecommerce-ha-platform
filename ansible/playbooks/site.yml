@@ -6,3 +6,4 @@
 - import_playbook: keepalived.yml
 - import_playbook: docker.yml
 - import_playbook: application.yml
+- import_playbook: postgresql.yml

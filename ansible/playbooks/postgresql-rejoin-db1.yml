@@ -1,0 +1,58 @@
+---
+- name: Rebuild db1 as standby of db2
+  hosts: db1
+  become: true
+
+  vars_files:
+    - ../vars/postgresql-vault.yml
+
+  tasks:
+    - name: Stop PostgreSQL on old primary
+      ansible.builtin.service:
+        name: postgresql
+        state: stopped
+
+    - name: Remove old db1 data directory
+      ansible.builtin.file:
+        path: "/var/lib/postgresql/{{ postgresql_version }}/main"
+        state: absent
+
+    - name: Recreate db1 data directory
+      ansible.builtin.file:
+        path: "/var/lib/postgresql/{{ postgresql_version }}/main"
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: "0700"
+
+    - name: Deploy replication password file
+      ansible.builtin.copy:
+        dest: /var/lib/postgresql/.pgpass
+        owner: postgres
+        group: postgres
+        mode: "0600"
+        content: |
+          {{ postgresql_standby_ip }}:{{ postgresql_port }}:*:{{ postgresql_replication_user }}:{{ vault_postgresql_replication_password }}
+      no_log: true
+
+    - name: Clone new primary db2 to db1
+      become_user: postgres
+      ansible.builtin.command:
+        cmd: >
+          pg_basebackup
+          -h {{ postgresql_standby_ip }}
+          -p {{ postgresql_port }}
+          -U {{ postgresql_replication_user }}
+          -D /var/lib/postgresql/{{ postgresql_version }}/main
+          -Fp
+          -Xs
+          -P
+          -R
+      environment:
+        PGPASSFILE: /var/lib/postgresql/.pgpass
+
+    - name: Start PostgreSQL on db1 as standby
+      ansible.builtin.service:
+        name: postgresql
+        state: started
+        enabled: true

@@ -1,0 +1,122 @@
+---
+- name: Install PostgreSQL
+  ansible.builtin.apt:
+    name:
+      - "postgresql-{{ postgresql_version }}"
+      - "postgresql-client-{{ postgresql_version }}"
+      - postgresql-contrib
+      - python3-psycopg2
+      - acl
+    state: present
+    update_cache: true
+
+- name: Ensure PostgreSQL is enabled and running
+  ansible.builtin.service:
+    name: postgresql
+    state: started
+    enabled: true
+
+- name: Remove stale Primary configuration from standby
+  ansible.builtin.file:
+    path: "/etc/postgresql/{{ postgresql_version }}/main/conf.d/99-ecommerce.conf"
+    state: absent
+  when: inventory_hostname == postgresql_standby_host
+  notify: Restart PostgreSQL
+
+- name: Remove stale Standby configuration from Primary
+  ansible.builtin.file:
+    path: "/etc/postgresql/{{ postgresql_version }}/main/conf.d/99-ecommerce-standby.conf"
+    state: absent
+  when: inventory_hostname == postgresql_primary_host
+  notify: Restart PostgreSQL
+
+- name: Deploy Standby PostgreSQL configuration
+  ansible.builtin.template:
+    src: 99-ecommerce-standby.conf.j2
+    dest: "/etc/postgresql/{{ postgresql_version }}/main/conf.d/99-ecommerce-standby.conf"
+    owner: postgres
+    group: postgres
+    mode: "0644"
+  when: inventory_hostname == postgresql_standby_host
+  notify: Restart PostgreSQL
+
+- name: Deploy Primary PostgreSQL configuration
+  ansible.builtin.template:
+    src: 99-ecommerce.conf.j2
+    dest: "/etc/postgresql/{{ postgresql_version }}/main/conf.d/99-ecommerce.conf"
+    owner: postgres
+    group: postgres
+    mode: "0644"
+  when: inventory_hostname == postgresql_primary_host
+  notify: Restart PostgreSQL
+
+- name: Allow application connections from app1
+  community.postgresql.postgresql_pg_hba:
+    dest: "/etc/postgresql/{{ postgresql_version }}/main/pg_hba.conf"
+    contype: host
+    databases: "{{ postgresql_database }}"
+    users: "{{ postgresql_app_user }}"
+    source: 10.40.40.21/32
+    method: scram-sha-256
+  when: inventory_hostname == postgresql_primary_host
+  notify: Reload PostgreSQL
+
+- name: Allow application connections from app2
+  community.postgresql.postgresql_pg_hba:
+    dest: "/etc/postgresql/{{ postgresql_version }}/main/pg_hba.conf"
+    contype: host
+    databases: "{{ postgresql_database }}"
+    users: "{{ postgresql_app_user }}"
+    source: 10.40.40.22/32
+    method: scram-sha-256
+  when: inventory_hostname == postgresql_primary_host
+  notify: Reload PostgreSQL
+
+- name: Allow replication from standby
+  community.postgresql.postgresql_pg_hba:
+    dest: "/etc/postgresql/{{ postgresql_version }}/main/pg_hba.conf"
+    contype: host
+    databases: replication
+    users: "{{ postgresql_replication_user }}"
+    source: "{{ postgresql_standby_ip }}/32"
+    method: scram-sha-256
+  when: inventory_hostname == postgresql_primary_host
+  notify: Reload PostgreSQL
+
+- name: Validate PostgreSQL Vault variables
+  ansible.builtin.assert:
+    that:
+      - vault_postgresql_app_password is defined
+      - vault_postgresql_app_password | length > 0
+      - vault_postgresql_replication_password is defined
+      - vault_postgresql_replication_password | length > 0
+    fail_msg: "PostgreSQL Vault variables are missing or empty"
+    success_msg: "PostgreSQL Vault variables are loaded"
+
+- name: Create ecommerce application user
+  become_user: postgres
+  community.postgresql.postgresql_user:
+    name: "{{ postgresql_app_user }}"
+    password: "{{ vault_postgresql_app_password }}"
+    role_attr_flags: LOGIN
+    state: present
+  when: inventory_hostname == postgresql_primary_host
+  no_log: true
+
+- name: Create replication user
+  become_user: postgres
+  community.postgresql.postgresql_user:
+    name: "{{ postgresql_replication_user }}"
+    password: "{{ vault_postgresql_replication_password }}"
+    role_attr_flags: "LOGIN,REPLICATION"
+    state: present
+  when: inventory_hostname == postgresql_primary_host
+  no_log: true
+
+- name: Create ecommerce database
+  become_user: postgres
+  community.postgresql.postgresql_db:
+    name: "{{ postgresql_database }}"
+    owner: "{{ postgresql_app_user }}"
+    state: present
+  when: inventory_hostname == postgresql_primary_host

@@ -1,0 +1,13 @@
+---
+postgresql_version: "16"
+postgresql_port: 5432
+
+postgresql_primary_host: db2
+postgresql_primary_ip: 10.40.40.32
+
+postgresql_standby_host: db1
+postgresql_standby_ip: 10.40.40.31
+
+postgresql_database: ecommerce
+postgresql_app_user: ecommerce_app
+postgresql_replication_user: replicator
