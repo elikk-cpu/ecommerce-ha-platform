@@ -3,6 +3,12 @@
   hosts: apps
   become: true
 
+  vars_files:
+    - ../vars/postgresql-vault.yml
+    - ../vars/redis-vault.yml
+    - ../vars/rabbitmq-vault.yml
+    - ../vars/minio-vault.yml
+
   roles:
     - docker
     - application

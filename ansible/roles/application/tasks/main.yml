@@ -7,6 +7,24 @@
     group: aa
     mode: "0755"
 
+- name: Create ecommerce configuration directory
+  ansible.builtin.file:
+    path: /etc/ecommerce
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Deploy ecommerce application environment
+  ansible.builtin.template:
+    src: app.env.j2
+    dest: /etc/ecommerce/app.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart application
+
 - name: Copy application source
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../../app/"
@@ -21,9 +39,9 @@
     name: ecommerce-api
     tag: local
     source: build
+    force_source: false
     build:
       path: /opt/ecommerce/app
-    force_source: false
 
 - name: Run ecommerce API container
   community.docker.docker_container:
@@ -35,6 +53,9 @@
     recreate: false
     ports:
       - "{{ app_bind_ip }}:8000:8000"
+
+    env_file: /etc/ecommerce/app.env
+
     env:
       APP_ENV: production
 

@@ -4,9 +4,9 @@
     name: ecommerce-api
     tag: local
     source: build
+    force_source: true
     build:
       path: /opt/ecommerce/app
-    force_source: true
   notify: Restart application
 
 - name: Restart application
@@ -15,9 +15,10 @@
     image: ecommerce-api:local
     hostname: "{{ inventory_hostname }}"
     state: started
-    restart: true
+    recreate: true
     restart_policy: unless-stopped
     ports:
       - "{{ app_bind_ip }}:8000:8000"
+    env_file: /etc/ecommerce/app.env
     env:
       APP_ENV: production
