@@ -1,0 +1,17 @@
+---
+- name: Prepare Docker runtime on MinIO node
+  hosts: minio
+  become: true
+
+  roles:
+    - docker
+
+- name: Deploy MinIO object storage
+  hosts: minio
+  become: true
+
+  vars_files:
+    - ../vars/minio-vault.yml
+
+  roles:
+    - minio

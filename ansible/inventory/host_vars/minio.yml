@@ -1,0 +1,9 @@
+---
+minio_api_ip: 10.40.40.61
+minio_console_ip: 10.10.10.61
+
+minio_api_port: 9000
+minio_console_port: 9001
+
+minio_data_dir: /srv/minio/data
+minio_bucket: ecommerce

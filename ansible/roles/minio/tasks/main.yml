@@ -1,0 +1,47 @@
+---
+- name: Create MinIO data directory
+  ansible.builtin.file:
+    path: "{{ minio_data_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Validate MinIO credentials
+  ansible.builtin.assert:
+    that:
+      - vault_minio_root_user is defined
+      - vault_minio_root_user | length >= 3
+      - vault_minio_root_password is defined
+      - vault_minio_root_password | length >= 8
+    fail_msg: "MinIO credentials are missing or too short"
+    success_msg: "MinIO credentials validation passed"
+  no_log: true
+
+- name: Run MinIO container
+  community.docker.docker_container:
+    name: minio
+    image: quay.io/minio/minio:latest
+    state: started
+    restart_policy: unless-stopped
+    pull: true
+    ports:
+      - "{{ minio_api_ip }}:{{ minio_api_port }}:9000"
+      - "{{ minio_console_ip }}:{{ minio_console_port }}:9001"
+    volumes:
+      - "{{ minio_data_dir }}:/data"
+    env:
+      MINIO_ROOT_USER: "{{ vault_minio_root_user }}"
+      MINIO_ROOT_PASSWORD: "{{ vault_minio_root_password }}"
+    command: "server /data --address :9000 --console-address :9001"
+  no_log: true
+
+- name: Wait for MinIO health endpoint
+  ansible.builtin.uri:
+    url: "http://{{ minio_api_ip }}:{{ minio_api_port }}/minio/health/live"
+    method: GET
+    status_code: 200
+  register: minio_health
+  retries: 15
+  delay: 2
+  until: minio_health.status == 200

@@ -1,0 +1,52 @@
+---
+- name: Configure and test MinIO
+  hosts: minio
+  become: true
+
+  vars_files:
+    - ../vars/minio-vault.yml
+
+  tasks:
+    - name: Create ecommerce bucket
+      ansible.builtin.shell: |
+        docker run --rm \
+          --network host \
+          --entrypoint /bin/sh \
+          -e MINIO_ROOT_USER="{{ vault_minio_root_user }}" \
+          -e MINIO_ROOT_PASSWORD="{{ vault_minio_root_password }}" \
+          quay.io/minio/mc:latest \
+          -c '
+            mc alias set local http://10.40.40.61:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" &&
+            mc mb --ignore-existing local/ecommerce
+          '
+      no_log: true
+
+    - name: Create test object
+      ansible.builtin.copy:
+        dest: /tmp/minio-test.txt
+        content: "MinIO S3 storage works\n"
+        mode: "0644"
+
+    - name: Upload and download test object
+      ansible.builtin.shell: |
+        docker run --rm \
+          --network host \
+          --entrypoint /bin/sh \
+          -v /tmp/minio-test.txt:/tmp/minio-test.txt:ro \
+          -e MINIO_ROOT_USER="{{ vault_minio_root_user }}" \
+          -e MINIO_ROOT_PASSWORD="{{ vault_minio_root_password }}" \
+          quay.io/minio/mc:latest \
+          -c '
+            mc alias set local http://10.40.40.61:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" &&
+            mc cp /tmp/minio-test.txt local/ecommerce/minio-test.txt &&
+            mc cat local/ecommerce/minio-test.txt
+          '
+      register: minio_test
+      no_log: true
+
+    - name: Verify MinIO object test
+      ansible.builtin.assert:
+        that:
+          - "'MinIO S3 storage works' in minio_test.stdout"
+        success_msg: "MinIO upload/download test passed"
+        fail_msg: "MinIO object test failed"

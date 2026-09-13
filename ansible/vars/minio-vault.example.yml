@@ -1,0 +1,3 @@
+---
+vault_minio_root_user: "CHANGE_ME"
+vault_minio_root_password: "CHANGE_ME"

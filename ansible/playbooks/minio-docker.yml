@@ -1,0 +1,7 @@
+---
+- name: Install Docker on MinIO node
+  hosts: minio
+  become: true
+
+  roles:
+    - docker

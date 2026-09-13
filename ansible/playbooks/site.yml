@@ -8,3 +8,4 @@
 - import_playbook: application.yml
 - import_playbook: postgresql.yml
 - import_playbook: rabbitmq.yml
+- import_playbook: minio.yml

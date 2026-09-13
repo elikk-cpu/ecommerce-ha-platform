@@ -24,3 +24,4 @@ Thumbs.db
 ansible/vars/postgresql-vault.yml
 ansible/vars/redis-vault.yml
 ansible/vars/rabbitmq-vault.yml
+ansible/vars/minio-vault.yml
