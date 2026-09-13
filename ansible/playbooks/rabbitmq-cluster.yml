@@ -1,0 +1,53 @@
+---
+- name: Build RabbitMQ cluster
+  hosts: rabbitmq
+  become: true
+
+  vars_files:
+    - ../vars/rabbitmq-vault.yml
+
+  tasks:
+    - name: Wait for RabbitMQ node
+      ansible.builtin.command:
+        cmd: rabbitmq-diagnostics ping
+      register: rabbitmq_ping
+      changed_when: false
+      retries: 10
+      delay: 3
+      until: rabbitmq_ping.rc == 0
+
+    - name: Get current RabbitMQ cluster status
+      ansible.builtin.command:
+        cmd: rabbitmqctl cluster_status
+      register: rabbitmq_cluster_status
+      changed_when: false
+
+    - name: Join node to RabbitMQ seed node
+      when:
+        - inventory_hostname != rabbitmq_seed_node
+        - "'rabbit@' + rabbitmq_seed_node not in rabbitmq_cluster_status.stdout"
+      block:
+        - name: Stop RabbitMQ application
+          ansible.builtin.command:
+            cmd: rabbitmqctl stop_app
+
+        - name: Reset RabbitMQ node
+          ansible.builtin.command:
+            cmd: rabbitmqctl reset
+
+        - name: Join RabbitMQ cluster
+          ansible.builtin.command:
+            cmd: "rabbitmqctl join_cluster rabbit@{{ rabbitmq_seed_node }}"
+
+        - name: Start RabbitMQ application
+          ansible.builtin.command:
+            cmd: rabbitmqctl start_app
+
+    - name: Wait for RabbitMQ after cluster join
+      ansible.builtin.command:
+        cmd: rabbitmq-diagnostics ping
+      register: rabbitmq_cluster_ping
+      changed_when: false
+      retries: 10
+      delay: 3
+      until: rabbitmq_cluster_ping.rc == 0

@@ -1,0 +1,4 @@
+---
+vault_rabbitmq_erlang_cookie: "CHANGE_ME"
+vault_rabbitmq_app_password: "CHANGE_ME"
+vault_rabbitmq_admin_password: "CHANGE_ME"

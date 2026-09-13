@@ -1,0 +1,72 @@
+---
+- name: RabbitMQ publish and consume smoke test
+  hosts: rabbit1
+  become: false
+
+  vars_files:
+    - ../vars/rabbitmq-vault.yml
+
+  tasks:
+    - name: Publish order.created message
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ rabbitmq_management_port }}/api/exchanges/%2Fecommerce/orders/publish"
+        method: POST
+        user: "{{ rabbitmq_admin_user }}"
+        password: "{{ vault_rabbitmq_admin_password }}"
+        force_basic_auth: true
+        body_format: json
+        body:
+          properties:
+            delivery_mode: 2
+          routing_key: "order.created"
+          payload: '{"order_id":1001,"status":"created"}'
+          payload_encoding: "string"
+        status_code: 200
+      register: rabbit_publish
+      no_log: true
+
+    - name: Verify message was routed
+      ansible.builtin.assert:
+        that:
+          - rabbit_publish.json.routed | bool
+        success_msg: "RabbitMQ message successfully routed to orders quorum queue"
+        fail_msg: "RabbitMQ message was not routed"
+
+    - name: Check queue before consuming
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ rabbitmq_management_port }}/api/queues/%2Fecommerce/orders"
+        method: GET
+        user: "{{ rabbitmq_admin_user }}"
+        password: "{{ vault_rabbitmq_admin_password }}"
+        force_basic_auth: true
+        status_code: 200
+      register: queue_status
+      no_log: true
+
+    - name: Show queue message count
+      ansible.builtin.debug:
+        msg: "orders queue messages={{ queue_status.json.messages }}"
+
+    - name: Consume one message
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ rabbitmq_management_port }}/api/queues/%2Fecommerce/orders/get"
+        method: POST
+        user: "{{ rabbitmq_admin_user }}"
+        password: "{{ vault_rabbitmq_admin_password }}"
+        force_basic_auth: true
+        body_format: json
+        body:
+          count: 1
+          ackmode: "ack_requeue_false"
+          encoding: "auto"
+          truncate: 50000
+        status_code: 200
+      register: consumed_messages
+      no_log: true
+
+    - name: Verify message was consumed
+      ansible.builtin.assert:
+        that:
+          - consumed_messages.json | length == 1
+        success_msg: "RabbitMQ publish/consume test passed"
+        fail_msg: "No message was consumed"

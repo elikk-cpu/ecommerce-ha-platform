@@ -1,0 +1,10 @@
+---
+- name: Configure RabbitMQ cluster nodes
+  hosts: rabbitmq
+  become: true
+
+  vars_files:
+    - ../vars/rabbitmq-vault.yml
+
+  roles:
+    - rabbitmq

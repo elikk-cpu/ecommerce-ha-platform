@@ -1,0 +1,46 @@
+---
+- name: Seed RabbitMQ messages for failover test
+  hosts: rabbit1
+  gather_facts: false
+
+  vars_files:
+    - ../vars/rabbitmq-vault.yml
+
+  tasks:
+    - name: Check RabbitMQ Management API
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ rabbitmq_management_port }}/api/overview"
+        method: GET
+        user: "{{ rabbitmq_admin_user }}"
+        password: "{{ vault_rabbitmq_admin_password }}"
+        force_basic_auth: true
+        status_code: 200
+      register: rabbitmq_api_check
+      no_log: true
+
+    - name: Confirm RabbitMQ Management API is reachable
+      ansible.builtin.debug:
+        msg: "RabbitMQ Management API status={{ rabbitmq_api_check.status }}"
+
+    - name: Publish failover test messages
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ rabbitmq_management_port }}/api/exchanges/%2Fecommerce/orders/publish"
+        method: POST
+        user: "{{ rabbitmq_admin_user }}"
+        password: "{{ vault_rabbitmq_admin_password }}"
+        force_basic_auth: true
+        body_format: json
+        body:
+          properties:
+            delivery_mode: 2
+          routing_key: "order.created"
+          payload: "{{ {'order_id': item, 'status': 'queued-before-failover'} | to_json }}"
+          payload_encoding: "string"
+        return_content: true
+        status_code: 200
+      loop:
+        - 2001
+        - 2002
+        - 2003
+      register: rabbitmq_publish_results
+      no_log: true

@@ -1,0 +1,152 @@
+---
+- name: Install RabbitMQ server
+  ansible.builtin.apt:
+    name:
+      - rabbitmq-server
+    state: present
+    update_cache: true
+
+- name: Ensure RabbitMQ is enabled and running
+  ansible.builtin.service:
+    name: rabbitmq-server
+    state: started
+    enabled: true
+
+- name: Configure RabbitMQ cluster hostname resolution
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} ANSIBLE MANAGED RABBITMQ CLUSTER"
+    block: |
+      10.40.40.51 rabbit1
+      10.40.40.52 rabbit2
+      10.40.40.53 rabbit3
+
+- name: Deploy shared Erlang cookie
+  ansible.builtin.copy:
+    content: "{{ vault_rabbitmq_erlang_cookie }}"
+    dest: /var/lib/rabbitmq/.erlang.cookie
+    owner: rabbitmq
+    group: rabbitmq
+    mode: "0400"
+  no_log: true
+  notify: Restart RabbitMQ
+
+- name: Enable RabbitMQ management plugin
+  ansible.builtin.command:
+    cmd: rabbitmq-plugins enable rabbitmq_management
+  register: rabbitmq_management
+  changed_when: "'enabled' in rabbitmq_management.stdout"
+
+- name: Create ecommerce RabbitMQ vhost
+  ansible.builtin.command:
+    cmd: "rabbitmqctl add_vhost {{ rabbitmq_vhost }}"
+  register: rabbitmq_vhost_create
+  failed_when:
+    - rabbitmq_vhost_create.rc != 0
+    - "'already exists' not in rabbitmq_vhost_create.stderr"
+  changed_when: rabbitmq_vhost_create.rc == 0
+  when: inventory_hostname == rabbitmq_seed_node
+
+- name: Create ecommerce application user
+  ansible.builtin.shell: >
+    rabbitmqctl add_user {{ rabbitmq_app_user }}
+    '{{ vault_rabbitmq_app_password }}'
+  register: rabbitmq_app_user_create
+  failed_when:
+    - rabbitmq_app_user_create.rc != 0
+    - "'already exists' not in rabbitmq_app_user_create.stderr"
+  changed_when: rabbitmq_app_user_create.rc == 0
+  when: inventory_hostname == rabbitmq_seed_node
+  no_log: true
+
+- name: Set ecommerce application permissions
+  ansible.builtin.command:
+    cmd: >
+      rabbitmqctl set_permissions
+      -p {{ rabbitmq_vhost }}
+      {{ rabbitmq_app_user }}
+      ".*" ".*" ".*"
+  when: inventory_hostname == rabbitmq_seed_node
+
+- name: Create RabbitMQ administrator
+  ansible.builtin.shell: >
+    rabbitmqctl add_user {{ rabbitmq_admin_user }}
+    '{{ vault_rabbitmq_admin_password }}'
+  register: rabbitmq_admin_create
+  failed_when:
+    - rabbitmq_admin_create.rc != 0
+    - "'already exists' not in rabbitmq_admin_create.stderr"
+  changed_when: rabbitmq_admin_create.rc == 0
+  when: inventory_hostname == rabbitmq_seed_node
+  no_log: true
+
+- name: Tag RabbitMQ administrator
+  ansible.builtin.command:
+    cmd: "rabbitmqctl set_user_tags {{ rabbitmq_admin_user }} administrator"
+  when: inventory_hostname == rabbitmq_seed_node
+
+- name: Set administrator permissions
+  ansible.builtin.command:
+    cmd: >
+      rabbitmqctl set_permissions
+      -p {{ rabbitmq_vhost }}
+      {{ rabbitmq_admin_user }}
+      ".*" ".*" ".*"
+  when: inventory_hostname == rabbitmq_seed_node
+
+- name: Create orders exchange
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ rabbitmq_management_port }}/api/exchanges/%2Fecommerce/orders"
+    method: PUT
+    user: "{{ rabbitmq_admin_user }}"
+    password: "{{ vault_rabbitmq_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      type: direct
+      durable: true
+      auto_delete: false
+      internal: false
+      arguments: {}
+    status_code:
+      - 201
+      - 204
+  when: inventory_hostname == rabbitmq_seed_node
+  no_log: true
+
+- name: Create orders quorum queue
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ rabbitmq_management_port }}/api/queues/%2Fecommerce/orders"
+    method: PUT
+    user: "{{ rabbitmq_admin_user }}"
+    password: "{{ vault_rabbitmq_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      durable: true
+      auto_delete: false
+      arguments:
+        x-queue-type: quorum
+        x-quorum-initial-group-size: 3
+    status_code:
+      - 201
+      - 204
+  when: inventory_hostname == rabbitmq_seed_node
+  no_log: true
+
+- name: Bind orders queue to orders exchange
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ rabbitmq_management_port }}/api/bindings/%2Fecommerce/e/orders/q/orders"
+    method: POST
+    user: "{{ rabbitmq_admin_user }}"
+    password: "{{ vault_rabbitmq_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      routing_key: order.created
+      arguments: {}
+    status_code:
+      - 201
+      - 204
+  when: inventory_hostname == rabbitmq_seed_node
+  no_log: true

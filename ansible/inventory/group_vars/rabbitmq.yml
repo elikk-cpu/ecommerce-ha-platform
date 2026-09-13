@@ -1,0 +1,14 @@
+---
+rabbitmq_nodes:
+  rabbit1: 10.40.40.51
+  rabbit2: 10.40.40.52
+  rabbit3: 10.40.40.53
+
+rabbitmq_seed_node: rabbit1
+
+rabbitmq_amqp_port: 5672
+rabbitmq_management_port: 15672
+
+rabbitmq_vhost: /ecommerce
+rabbitmq_app_user: ecommerce_app
+rabbitmq_admin_user: rabbitmq_admin
