@@ -1,0 +1,67 @@
+---
+- name: Install Grafana OSS
+  hosts: monitor
+  become: true
+  gather_facts: true
+
+  vars:
+    grafana_version: "13.2.1"
+    grafana_build: "33191028959"
+
+    grafana_deb_url: >-
+      https://github.com/grafana/grafana/releases/download/v13.2.1/grafana_13.2.1_33191028959_linux_amd64.deb
+
+    grafana_deb_path: >-
+      /tmp/grafana_13.2.1_linux_amd64.deb
+
+    grafana_sha256: "b4f088f661c5103746f23cb5cbbe2b2bb2e18ba9870ad68a3c2a90451f511ded"
+
+  tasks:
+    - name: Install Grafana package dependencies
+      ansible.builtin.apt:
+        name:
+          - adduser
+          - libfontconfig1
+          - musl
+          - ca-certificates
+        state: present
+        update_cache: true
+
+    - name: Remove unused Grafana APT repository file
+      ansible.builtin.file:
+        path: /etc/apt/sources.list.d/grafana.list
+        state: absent
+
+    - name: Remove unused Grafana repository key
+      ansible.builtin.file:
+        path: /etc/apt/keyrings/grafana.asc
+        state: absent
+
+    - name: Download Grafana OSS package
+      ansible.builtin.get_url:
+        url: "{{ grafana_deb_url }}"
+        dest: "{{ grafana_deb_path }}"
+        mode: "0644"
+        checksum: "sha256:{{ grafana_sha256 }}"
+        force: false
+
+    - name: Install Grafana OSS package
+      ansible.builtin.apt:
+        deb: "{{ grafana_deb_path }}"
+        state: present
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable and start Grafana
+      ansible.builtin.systemd:
+        name: grafana-server
+        enabled: true
+        state: started
+
+    - name: Remove downloaded Grafana package
+      ansible.builtin.file:
+        path: "{{ grafana_deb_path }}"
+        state: absent
+

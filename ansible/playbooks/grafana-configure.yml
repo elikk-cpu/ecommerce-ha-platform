@@ -1,0 +1,40 @@
+---
+- name: Configure Grafana
+  hosts: monitor
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Ensure Grafana datasource provisioning directory exists
+      ansible.builtin.file:
+        path: /etc/grafana/provisioning/datasources
+        state: directory
+        owner: root
+        group: grafana
+        mode: "0755"
+
+    - name: Provision Prometheus datasource
+      ansible.builtin.copy:
+        dest: /etc/grafana/provisioning/datasources/prometheus.yml
+        owner: root
+        group: grafana
+        mode: "0644"
+        content: |
+          apiVersion: 1
+
+          datasources:
+            - name: Prometheus
+              type: prometheus
+              access: proxy
+              url: http://127.0.0.1:9090
+              isDefault: true
+              editable: false
+              jsonData:
+                timeInterval: 15s
+      notify: Restart Grafana
+
+  handlers:
+    - name: Restart Grafana
+      ansible.builtin.systemd:
+        name: grafana-server
+        state: restarted

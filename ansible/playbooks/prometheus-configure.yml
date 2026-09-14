@@ -1,0 +1,40 @@
+---
+- name: Configure Prometheus
+  hosts: monitor
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Ensure Prometheus rules directory exists
+      ansible.builtin.file:
+        path: /etc/prometheus/rules
+        state: directory
+        owner: root
+        group: prometheus
+        mode: "0755"
+
+    - name: Deploy Prometheus alert rules
+      ansible.builtin.template:
+        src: ../templates/prometheus-alerts.yml.j2
+        dest: /etc/prometheus/rules/ecommerce-alerts.yml
+        owner: root
+        group: prometheus
+        mode: "0644"
+        validate: "/usr/bin/promtool check rules %s"
+      notify: Restart Prometheus
+
+    - name: Deploy Prometheus configuration
+      ansible.builtin.template:
+        src: ../templates/prometheus.yml.j2
+        dest: /etc/prometheus/prometheus.yml
+        owner: root
+        group: prometheus
+        mode: "0644"
+        validate: "/usr/bin/promtool check config %s"
+      notify: Restart Prometheus
+
+  handlers:
+    - name: Restart Prometheus
+      ansible.builtin.systemd:
+        name: prometheus
+        state: restarted

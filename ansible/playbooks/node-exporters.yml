@@ -1,0 +1,19 @@
+---
+- name: Install Prometheus Node Exporter
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Install Node Exporter
+      ansible.builtin.apt:
+        name: prometheus-node-exporter
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Enable and start Node Exporter
+      ansible.builtin.systemd:
+        name: prometheus-node-exporter
+        enabled: true
+        state: started

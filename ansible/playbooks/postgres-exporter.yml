@@ -1,0 +1,36 @@
+---
+- name: Configure PostgreSQL Prometheus exporter
+  hosts: databases
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Install PostgreSQL exporter
+      ansible.builtin.apt:
+        name: prometheus-postgres-exporter
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Configure PostgreSQL exporter datasource
+      ansible.builtin.copy:
+        dest: /etc/default/prometheus-postgres-exporter
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          DATA_SOURCE_NAME='user=prometheus host=/run/postgresql dbname=postgres'
+          ARGS=""
+      notify: Restart PostgreSQL exporter
+
+    - name: Enable and start PostgreSQL exporter
+      ansible.builtin.systemd:
+        name: prometheus-postgres-exporter
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Restart PostgreSQL exporter
+      ansible.builtin.systemd:
+        name: prometheus-postgres-exporter
+        state: restarted

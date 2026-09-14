@@ -1,0 +1,41 @@
+---
+- name: Configure Redis Prometheus exporter
+  hosts: redis
+  become: true
+  gather_facts: true
+
+  vars_files:
+    - ../vars/redis-vault.yml
+
+  tasks:
+    - name: Install Redis exporter
+      ansible.builtin.apt:
+        name: prometheus-redis-exporter
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Configure Redis exporter
+      ansible.builtin.copy:
+        dest: /etc/default/prometheus-redis-exporter
+        owner: root
+        group: prometheus
+        mode: "0640"
+        content: |
+          REDIS_ADDR="redis://127.0.0.1:6379"
+          REDIS_PASSWORD={{ vault_redis_password | quote }}
+          ARGS=""
+      notify: Restart Redis exporter
+      no_log: true
+
+    - name: Enable and start Redis exporter
+      ansible.builtin.systemd:
+        name: prometheus-redis-exporter
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Restart Redis exporter
+      ansible.builtin.systemd:
+        name: prometheus-redis-exporter
+        state: restarted

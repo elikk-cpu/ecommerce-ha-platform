@@ -17,8 +17,12 @@
     state: started
     recreate: true
     restart_policy: unless-stopped
+
     ports:
       - "{{ app_bind_ip }}:8000:8000"
+      - "{{ ansible_host }}:9101:8000"
+
     env_file: /etc/ecommerce/app.env
+
     env:
       APP_ENV: production

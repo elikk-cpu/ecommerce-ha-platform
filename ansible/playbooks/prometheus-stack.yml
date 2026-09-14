@@ -1,0 +1,37 @@
+---
+- name: Install Prometheus monitoring stack
+  hosts: monitor
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install Prometheus packages
+      ansible.builtin.apt:
+        name:
+          - prometheus
+          - prometheus-alertmanager
+          - prometheus-node-exporter
+        state: present
+
+    - name: Enable and start Prometheus
+      ansible.builtin.systemd:
+        name: prometheus
+        enabled: true
+        state: started
+
+    - name: Enable and start Alertmanager
+      ansible.builtin.systemd:
+        name: prometheus-alertmanager
+        enabled: true
+        state: started
+
+    - name: Enable and start Node Exporter
+      ansible.builtin.systemd:
+        name: prometheus-node-exporter
+        enabled: true
+        state: started

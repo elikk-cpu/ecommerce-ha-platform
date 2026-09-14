@@ -1,0 +1,48 @@
+groups:
+  - name: ecommerce-platform
+    rules:
+
+      - alert: NodeExporterDown
+        expr: up{job="node_exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{% raw %}Node exporter down on {{ $labels.instance }}{% endraw %}"
+          description: "Prometheus cannot scrape node_exporter for more than 1 minute."
+
+      - alert: FastAPIDown
+        expr: up{job="fastapi"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "{% raw %}FastAPI metrics endpoint down on {{ $labels.instance }}{% endraw %}"
+          description: "Prometheus cannot scrape the FastAPI instance."
+
+      - alert: PostgreSQLExporterDown
+        expr: up{job="postgresql"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{% raw %}PostgreSQL exporter down on {{ $labels.instance }}{% endraw %}"
+          description: "Prometheus cannot scrape PostgreSQL metrics."
+
+      - alert: RedisExporterDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{% raw %}Redis exporter down on {{ $labels.instance }}{% endraw %}"
+          description: "Prometheus cannot scrape Redis metrics."
+
+      - alert: RabbitMQMetricsDown
+        expr: up{job="rabbitmq"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{% raw %}RabbitMQ metrics down on {{ $labels.instance }}{% endraw %}"
+          description: "Prometheus cannot scrape RabbitMQ metrics."
