@@ -1,0 +1,107 @@
+---
+- name: Install and configure OpenSearch
+  hosts: logging
+  become: true
+  gather_facts: true
+
+  vars:
+    opensearch_version: "3.8.0"
+
+  tasks:
+    - name: Install repository prerequisites
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+        update_cache: true
+
+    - name: Ensure APT keyrings directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Download OpenSearch signing key
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -fsSL https://artifacts.opensearch.org/publickeys/opensearch-release.pgp \
+          | gpg --dearmor --yes -o /etc/apt/keyrings/opensearch.gpg
+      args:
+        executable: /bin/bash
+        creates: /etc/apt/keyrings/opensearch.gpg
+
+    - name: Configure OpenSearch APT repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/opensearch-3.x.list
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          deb [signed-by=/etc/apt/keyrings/opensearch.gpg] https://artifacts.opensearch.org/releases/bundle/opensearch/3.x/apt stable main
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Install OpenSearch
+      ansible.builtin.apt:
+        name: "opensearch={{ opensearch_version }}"
+        state: present
+      environment:
+        DISABLE_INSTALL_DEMO_CONFIG: "true"
+        DISABLE_SECURITY_PLUGIN: "true"
+
+    - name: Configure OpenSearch
+      ansible.builtin.copy:
+        dest: /etc/opensearch/opensearch.yml
+        owner: root
+        group: opensearch
+        mode: "0640"
+        content: |
+          cluster.name: ecommerce-logs
+          node.name: logging
+
+          network.host: 10.10.10.80
+          http.port: 9200
+
+          discovery.type: single-node
+
+          path.data: /var/lib/opensearch
+          path.logs: /var/log/opensearch
+
+          plugins.security.disabled: true
+      notify: Restart OpenSearch
+
+    - name: Remove package default JVM heap settings
+      ansible.builtin.lineinfile:
+        path: /etc/opensearch/jvm.options
+        regexp: '^-Xm[sx].*$'
+        state: absent
+      notify: Restart OpenSearch
+
+    - name: Configure OpenSearch JVM heap
+      ansible.builtin.copy:
+        dest: /etc/opensearch/jvm.options.d/heap.options
+        owner: root
+        group: opensearch
+        mode: "0644"
+        content: |
+          -Xms2g
+          -Xmx2g
+      notify: Restart OpenSearch
+
+    - name: Enable and start OpenSearch
+      ansible.builtin.systemd:
+        name: opensearch
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Restart OpenSearch
+      ansible.builtin.systemd:
+        name: opensearch
+        state: restarted

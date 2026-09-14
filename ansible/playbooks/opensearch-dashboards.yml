@@ -1,0 +1,81 @@
+---
+- name: Install and configure OpenSearch Dashboards
+  hosts: logging
+  become: true
+  gather_facts: true
+
+  vars:
+    dashboards_version: "3.8.0"
+
+  tasks:
+    - name: Configure OpenSearch Dashboards APT repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/opensearch-dashboards-3.x.list
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          deb [signed-by=/etc/apt/keyrings/opensearch.gpg] https://artifacts.opensearch.org/releases/bundle/opensearch-dashboards/3.x/apt stable main
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Install OpenSearch Dashboards
+      ansible.builtin.apt:
+        name: "opensearch-dashboards={{ dashboards_version }}"
+        state: present
+
+    - name: Check installed OpenSearch Dashboards plugins
+      ansible.builtin.command:
+        cmd: >
+          /usr/share/opensearch-dashboards/bin/opensearch-dashboards-plugin
+          list --allow-root
+      register: dashboards_plugins
+      changed_when: false
+
+    - name: Remove Security Dashboards plugin
+      ansible.builtin.command:
+        cmd: >
+          /usr/share/opensearch-dashboards/bin/opensearch-dashboards-plugin
+          remove securityDashboards --allow-root
+      when: "'securityDashboards' in dashboards_plugins.stdout"
+      notify: Restart OpenSearch Dashboards
+
+    - name: Configure OpenSearch Dashboards
+      ansible.builtin.copy:
+        dest: /etc/opensearch-dashboards/opensearch_dashboards.yml
+        owner: root
+        group: opensearch-dashboards
+        mode: "0640"
+        content: |
+          server.name: "ecommerce-logs"
+          server.host: "10.10.10.80"
+          server.port: 5601
+
+          opensearch.hosts:
+            - "http://10.10.10.80:9200"
+      notify: Restart OpenSearch Dashboards
+
+    - name: Enable and start OpenSearch Dashboards
+      ansible.builtin.systemd:
+        name: opensearch-dashboards
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Apply pending handlers
+      ansible.builtin.meta: flush_handlers
+
+    - name: Wait for OpenSearch Dashboards
+      ansible.builtin.wait_for:
+        host: 10.10.10.80
+        port: 5601
+        delay: 2
+        timeout: 60
+
+  handlers:
+    - name: Restart OpenSearch Dashboards
+      ansible.builtin.systemd:
+        name: opensearch-dashboards
+        state: restarted

@@ -1,0 +1,78 @@
+---
+- name: Configure OpenSearch index templates
+  hosts: logging
+  become: false
+  gather_facts: false
+
+  tasks:
+    - name: Create ecommerce application logs index template
+      ansible.builtin.uri:
+        url: http://10.10.10.80:9200/_index_template/ecommerce-app
+        method: PUT
+        body_format: json
+        body:
+          index_patterns:
+            - "ecommerce-app-*"
+
+          priority: 100
+
+          template:
+            settings:
+              number_of_shards: 1
+              number_of_replicas: 0
+
+            mappings:
+              properties:
+                "@timestamp":
+                  type: date
+                host:
+                  type: keyword
+                service:
+                  type: keyword
+                environment:
+                  type: keyword
+                stream:
+                  type: keyword
+                source_file:
+                  type: keyword
+                log:
+                  type: text
+
+        status_code:
+          - 200
+
+    - name: Create ecommerce system logs index template
+      ansible.builtin.uri:
+        url: http://10.10.10.80:9200/_index_template/ecommerce-system
+        method: PUT
+        body_format: json
+        body:
+          index_patterns:
+            - "ecommerce-system-*"
+
+          priority: 100
+
+          template:
+            settings:
+              number_of_shards: 1
+              number_of_replicas: 0
+
+            mappings:
+              properties:
+                "@timestamp":
+                  type: date
+                host:
+                  type: keyword
+                environment:
+                  type: keyword
+                log_type:
+                  type: keyword
+                MESSAGE:
+                  type: text
+                SYSTEMD_UNIT:
+                  type: keyword
+                SYSLOG_IDENTIFIER:
+                  type: keyword
+
+        status_code:
+          - 200

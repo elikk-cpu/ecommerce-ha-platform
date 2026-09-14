@@ -1,0 +1,80 @@
+---
+- name: Install Fluent Bit on application nodes
+  hosts: apps
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Install Fluent Bit repository prerequisites
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+        update_cache: true
+
+    - name: Ensure APT keyrings directory exists
+      ansible.builtin.file:
+        path: /usr/share/keyrings
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install Fluent Bit repository key
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -fsSL https://packages.fluentbit.io/fluentbit.key \
+          | gpg --dearmor --yes \
+          -o /usr/share/keyrings/fluentbit-keyring.gpg
+      args:
+        executable: /bin/bash
+        creates: /usr/share/keyrings/fluentbit-keyring.gpg
+
+    - name: Configure Fluent Bit APT repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/fluent-bit.list
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          deb [signed-by=/usr/share/keyrings/fluentbit-keyring.gpg] https://packages.fluentbit.io/ubuntu/noble noble main
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Install Fluent Bit
+      ansible.builtin.apt:
+        name: fluent-bit
+        state: present
+
+    - name: Ensure Fluent Bit state directory exists
+      ansible.builtin.file:
+        path: /var/lib/fluent-bit
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy Fluent Bit configuration
+      ansible.builtin.template:
+        src: ../templates/fluent-bit.conf.j2
+        dest: /etc/fluent-bit/fluent-bit.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart Fluent Bit
+
+    - name: Enable and start Fluent Bit
+      ansible.builtin.systemd:
+        name: fluent-bit
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Restart Fluent Bit
+      ansible.builtin.systemd:
+        name: fluent-bit
+        state: restarted

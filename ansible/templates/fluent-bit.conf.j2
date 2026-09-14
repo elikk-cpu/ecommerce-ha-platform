@@ -1,0 +1,69 @@
+[SERVICE]
+    Flush                     5
+    Daemon                    Off
+    Log_Level                 info
+    Parsers_File              /etc/fluent-bit/parsers.conf
+
+# =========================
+# Docker / FastAPI logs
+# =========================
+
+[INPUT]
+    Name                      tail
+    Path                      /var/lib/docker/containers/*/*-json.log
+    Parser                    docker
+    Tag                       ecommerce.app
+    DB                        /var/lib/fluent-bit/docker.db
+    Mem_Buf_Limit             50MB
+    Skip_Long_Lines           On
+    Refresh_Interval          5
+    Rotate_Wait               30
+    Path_Key                  source_file
+
+[FILTER]
+    Name                      record_modifier
+    Match                     ecommerce.app
+    Record                    host {{ inventory_hostname }}
+    Record                    service ecommerce-api
+    Record                    environment lab
+    Record                    log_type application
+
+[OUTPUT]
+    Name                      opensearch
+    Match                     ecommerce.app
+    Host                      10.10.10.80
+    Port                      9200
+    Logstash_Format           On
+    Logstash_Prefix           ecommerce-app
+    Suppress_Type_Name        On
+    Generate_ID               On
+    Retry_Limit               False
+
+# =========================
+# systemd / journald logs
+# =========================
+
+[INPUT]
+    Name                      systemd
+    Tag                       ecommerce.system
+    DB                        /var/lib/fluent-bit/systemd.db
+    Read_From_Tail            On
+    Strip_Underscores         On
+
+[FILTER]
+    Name                      record_modifier
+    Match                     ecommerce.system
+    Record                    host {{ inventory_hostname }}
+    Record                    environment lab
+    Record                    log_type system
+
+[OUTPUT]
+    Name                      opensearch
+    Match                     ecommerce.system
+    Host                      10.10.10.80
+    Port                      9200
+    Logstash_Format           On
+    Logstash_Prefix           ecommerce-system
+    Suppress_Type_Name        On
+    Generate_ID               On
+    Retry_Limit               False
