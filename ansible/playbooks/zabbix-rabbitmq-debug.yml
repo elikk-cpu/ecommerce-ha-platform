@@ -1,0 +1,54 @@
+---
+- name: Debug RabbitMQ Zabbix items
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../vars/zabbix-vault.yml
+
+  vars:
+    zabbix_api_url: "http://10.10.10.70/api_jsonrpc.php"
+
+  tasks:
+    - name: Get RabbitMQ item diagnostics
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: item.get
+          params:
+            output:
+              - itemid
+              - hostid
+              - name
+              - key_
+              - lastvalue
+              - lastclock
+              - state
+              - status
+              - error
+            itemids:
+              - "52634"
+              - "52635"
+              - "52636"
+              - "52637"
+              - "52638"
+              - "52639"
+              - "52640"
+              - "52641"
+              - "52642"
+          id: 1
+        return_content: true
+      register: rabbit_debug
+      no_log: true
+
+    - name: Show RabbitMQ item diagnostics
+      ansible.builtin.debug:
+        msg: "{{ rabbit_debug.json.result }}"

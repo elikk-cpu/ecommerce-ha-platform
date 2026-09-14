@@ -1,0 +1,285 @@
+---
+- name: Configure Redis HA monitoring in Zabbix
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../vars/zabbix-vault.yml
+
+  vars:
+    zabbix_api_url: "http://10.10.10.70/api_jsonrpc.php"
+
+    redis_items:
+      - host: redis1
+        name: "Redis role"
+        key: "ecommerce.redis.role"
+
+      - host: redis1
+        name: "Redis replication health"
+        key: "ecommerce.redis.replication"
+
+      - host: redis1
+        name: "Redis Sentinel quorum"
+        key: "ecommerce.redis.sentinel_quorum"
+
+      - host: redis2
+        name: "Redis role"
+        key: "ecommerce.redis.role"
+
+      - host: redis2
+        name: "Redis replication health"
+        key: "ecommerce.redis.replication"
+
+      - host: redis2
+        name: "Redis Sentinel quorum"
+        key: "ecommerce.redis.sentinel_quorum"
+
+      - host: rabbit3
+        name: "Redis Sentinel quorum"
+        key: "ecommerce.redis.sentinel_quorum"
+
+  tasks:
+    - name: Get Redis monitoring hosts
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: host.get
+          params:
+            output:
+              - hostid
+              - host
+            filter:
+              host:
+                - redis1
+                - redis2
+                - rabbit3
+            selectInterfaces:
+              - interfaceid
+              - ip
+          id: 1
+        return_content: true
+      register: redis_hosts
+      no_log: true
+
+    - name: Build Redis host lookup
+      ansible.builtin.set_fact:
+        redis_host_lookup: >-
+          {{
+            redis_host_lookup | default({}) |
+            combine({
+              item.host: {
+                'hostid': item.hostid,
+                'interfaceid': item.interfaces[0].interfaceid
+              }
+            })
+          }}
+      loop: "{{ redis_hosts.json.result }}"
+      loop_control:
+        label: "{{ item.host }}"
+
+    - name: Find existing Redis items
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: item.get
+          params:
+            output:
+              - itemid
+              - key_
+            hostids:
+              - "{{ redis_host_lookup[item.host].hostid }}"
+            filter:
+              key_:
+                - "{{ item.key }}"
+          id: 2
+        return_content: true
+      loop: "{{ redis_items }}"
+      loop_control:
+        label: "{{ item.host }} / {{ item.key }}"
+      register: redis_existing_items
+      no_log: true
+
+    - name: Create missing Redis items
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: item.create
+          params:
+            name: "{{ item.item.name }}"
+            key_: "{{ item.item.key }}"
+            hostid: "{{ redis_host_lookup[item.item.host].hostid }}"
+            interfaceid: "{{ redis_host_lookup[item.item.host].interfaceid }}"
+            type: 0
+            value_type: 3
+            delay: "30s"
+            history: "7d"
+            trends: "30d"
+          id: 3
+        return_content: true
+      loop: "{{ redis_existing_items.results }}"
+      loop_control:
+        label: "{{ item.item.host }} / {{ item.item.key }}"
+      when: item.json.result | length == 0
+      no_log: true
+
+    - name: Find Redis HA triggers
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: trigger.get
+          params:
+            output:
+              - triggerid
+              - description
+            filter:
+              description:
+                - "Redis replication is unhealthy"
+                - "Redis HA topology is invalid"
+                - "Redis Sentinel quorum is lost"
+          id: 4
+        return_content: true
+      register: redis_triggers
+      no_log: true
+
+    - name: Create Redis replication trigger
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: trigger.create
+          params:
+            description: "Redis replication is unhealthy"
+            expression: 'last(/redis1/ecommerce.redis.replication)=0 or last(/redis2/ecommerce.redis.replication)=0'
+            priority: 4
+            manual_close: 1
+          id: 5
+        return_content: true
+      when: >
+        redis_triggers.json.result
+        | selectattr('description', 'equalto', 'Redis replication is unhealthy')
+        | list
+        | length == 0
+      no_log: true
+
+    - name: Create Redis topology trigger
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: trigger.create
+          params:
+            description: "Redis HA topology is invalid"
+            expression: 'last(/redis1/ecommerce.redis.role)=last(/redis2/ecommerce.redis.role)'
+            priority: 5
+            manual_close: 1
+          id: 6
+        return_content: true
+      when: >
+        redis_triggers.json.result
+        | selectattr('description', 'equalto', 'Redis HA topology is invalid')
+        | list
+        | length == 0
+      no_log: true
+
+    - name: Create Redis Sentinel quorum trigger
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: trigger.create
+          params:
+            description: "Redis Sentinel quorum is lost"
+            expression: 'last(/redis1/ecommerce.redis.sentinel_quorum)+last(/redis2/ecommerce.redis.sentinel_quorum)+last(/rabbit3/ecommerce.redis.sentinel_quorum)<2'
+            priority: 5
+            manual_close: 1
+          id: 7
+        return_content: true
+      when: >
+        redis_triggers.json.result
+        | selectattr('description', 'equalto', 'Redis Sentinel quorum is lost')
+        | list
+        | length == 0
+      no_log: true
+
+    - name: Verify Redis monitoring items
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: item.get
+          params:
+            output:
+              - itemid
+              - name
+              - key_
+              - lastvalue
+            hostids:
+              - "{{ redis_host_lookup['redis1'].hostid }}"
+              - "{{ redis_host_lookup['redis2'].hostid }}"
+              - "{{ redis_host_lookup['rabbit3'].hostid }}"
+            filter:
+              key_:
+                - "ecommerce.redis.role"
+                - "ecommerce.redis.replication"
+                - "ecommerce.redis.sentinel_quorum"
+          id: 8
+        return_content: true
+      register: redis_verify
+      no_log: true
+
+    - name: Show Redis monitoring items
+      ansible.builtin.debug:
+        msg: "{{ redis_verify.json.result }}"

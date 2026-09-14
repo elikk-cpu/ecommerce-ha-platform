@@ -1,0 +1,243 @@
+---
+- name: Configure PostgreSQL HA monitoring in Zabbix
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../vars/zabbix-vault.yml
+
+  vars:
+    zabbix_api_url: "http://10.10.10.70/api_jsonrpc.php"
+
+    postgresql_items:
+      - host: db1
+        name: "PostgreSQL role"
+        key: "ecommerce.pg.role"
+
+      - host: db1
+        name: "PostgreSQL replication health"
+        key: "ecommerce.pg.replication"
+
+      - host: db2
+        name: "PostgreSQL role"
+        key: "ecommerce.pg.role"
+
+      - host: db2
+        name: "PostgreSQL replication health"
+        key: "ecommerce.pg.replication"
+
+  tasks:
+    - name: Get PostgreSQL hosts
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: host.get
+          params:
+            output:
+              - hostid
+              - host
+            filter:
+              host:
+                - db1
+                - db2
+            selectInterfaces:
+              - interfaceid
+              - ip
+          id: 1
+        return_content: true
+      register: pg_hosts
+      no_log: true
+
+    - name: Build PostgreSQL host lookup
+      ansible.builtin.set_fact:
+        pg_host_lookup: >-
+          {{
+            pg_host_lookup | default({}) |
+            combine({
+              item.host: {
+                'hostid': item.hostid,
+                'interfaceid': item.interfaces[0].interfaceid
+              }
+            })
+          }}
+      loop: "{{ pg_hosts.json.result }}"
+      loop_control:
+        label: "{{ item.host }}"
+
+    - name: Find existing PostgreSQL items
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: item.get
+          params:
+            output:
+              - itemid
+              - key_
+            hostids:
+              - "{{ pg_host_lookup[item.host].hostid }}"
+            filter:
+              key_:
+                - "{{ item.key }}"
+          id: 2
+        return_content: true
+      loop: "{{ postgresql_items }}"
+      loop_control:
+        label: "{{ item.host }} / {{ item.key }}"
+      register: pg_existing_items
+      no_log: true
+
+    - name: Create missing PostgreSQL items
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: item.create
+          params:
+            name: "{{ item.item.name }}"
+            key_: "{{ item.item.key }}"
+            hostid: "{{ pg_host_lookup[item.item.host].hostid }}"
+            interfaceid: "{{ pg_host_lookup[item.item.host].interfaceid }}"
+            type: 0
+            value_type: 3
+            delay: "30s"
+            history: "7d"
+            trends: "30d"
+          id: 3
+        return_content: true
+      loop: "{{ pg_existing_items.results }}"
+      loop_control:
+        label: "{{ item.item.host }} / {{ item.item.key }}"
+      when: item.json.result | length == 0
+      no_log: true
+
+    - name: Find PostgreSQL HA triggers
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: trigger.get
+          params:
+            output:
+              - triggerid
+              - description
+            filter:
+              description:
+                - "PostgreSQL replication is unhealthy"
+                - "PostgreSQL HA topology is invalid"
+          id: 4
+        return_content: true
+      register: pg_triggers
+      no_log: true
+
+    - name: Create PostgreSQL replication trigger
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: trigger.create
+          params:
+            description: "PostgreSQL replication is unhealthy"
+            expression: 'last(/db1/ecommerce.pg.replication)=0 or last(/db2/ecommerce.pg.replication)=0'
+            priority: 4
+            manual_close: 1
+          id: 5
+        return_content: true
+      when: >
+        pg_triggers.json.result
+        | selectattr('description', 'equalto', 'PostgreSQL replication is unhealthy')
+        | list
+        | length == 0
+      no_log: true
+
+    - name: Create PostgreSQL topology trigger
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: trigger.create
+          params:
+            description: "PostgreSQL HA topology is invalid"
+            expression: 'last(/db1/ecommerce.pg.role)=last(/db2/ecommerce.pg.role)'
+            priority: 5
+            manual_close: 1
+          id: 6
+        return_content: true
+      when: >
+        pg_triggers.json.result
+        | selectattr('description', 'equalto', 'PostgreSQL HA topology is invalid')
+        | list
+        | length == 0
+      no_log: true
+
+    - name: Verify PostgreSQL monitoring items
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: item.get
+          params:
+            output:
+              - itemid
+              - name
+              - key_
+              - lastvalue
+            hostids:
+              - "{{ pg_host_lookup['db1'].hostid }}"
+              - "{{ pg_host_lookup['db2'].hostid }}"
+            filter:
+              key_:
+                - "ecommerce.pg.role"
+                - "ecommerce.pg.replication"
+          id: 7
+        return_content: true
+      register: pg_verify
+      no_log: true
+
+    - name: Show PostgreSQL monitoring items
+      ansible.builtin.debug:
+        msg: "{{ pg_verify.json.result }}"

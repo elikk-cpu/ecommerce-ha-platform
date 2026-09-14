@@ -1,0 +1,23 @@
+#!/bin/bash
+
+set -u
+
+CACHE_DIR="/var/cache/zabbix-rabbitmq"
+
+for CHECK in node cluster quorum; do
+    VALUE="$(
+        timeout 8 /usr/local/bin/zabbix-rabbitmq-check "$CHECK" 2>/dev/null \
+        || true
+    )"
+
+    case "$VALUE" in
+        0|1)
+            ;;
+        *)
+            VALUE=0
+            ;;
+    esac
+
+    printf '%s\n' "$VALUE" > "${CACHE_DIR}/${CHECK}.tmp"
+    mv "${CACHE_DIR}/${CHECK}.tmp" "${CACHE_DIR}/${CHECK}"
+done

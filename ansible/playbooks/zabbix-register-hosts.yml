@@ -1,0 +1,238 @@
+---
+- name: Register infrastructure hosts in Zabbix
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../vars/zabbix-vault.yml
+
+  vars:
+    zabbix_api_url: "http://10.10.10.70/api_jsonrpc.php"
+    zabbix_group_name: "Ecommerce HA Platform"
+    zabbix_template_name: "Linux by Zabbix agent"
+
+    zabbix_hosts:
+      - { name: "bastion",   ip: "10.10.10.254", component: "bastion" }
+      - { name: "lb1",       ip: "10.10.10.11",  component: "load-balancer" }
+      - { name: "lb2",       ip: "10.10.10.12",  component: "load-balancer" }
+      - { name: "app1",      ip: "10.10.10.21",  component: "application" }
+      - { name: "app2",      ip: "10.10.10.22",  component: "application" }
+      - { name: "db1",       ip: "10.10.10.31",  component: "postgresql" }
+      - { name: "db2",       ip: "10.10.10.32",  component: "postgresql" }
+      - { name: "redis1",    ip: "10.10.10.41",  component: "redis" }
+      - { name: "redis2",    ip: "10.10.10.42",  component: "redis" }
+      - { name: "rabbit1",   ip: "10.10.10.51",  component: "rabbitmq" }
+      - { name: "rabbit2",   ip: "10.10.10.52",  component: "rabbitmq" }
+      - { name: "rabbit3",   ip: "10.10.10.53",  component: "rabbitmq" }
+      - { name: "minio",     ip: "10.10.10.61",  component: "object-storage" }
+      - { name: "monitor",   ip: "10.10.10.70",  component: "monitoring" }
+      - { name: "logging",   ip: "10.10.10.80",  component: "logging" }
+      - { name: "ci-runner", ip: "10.10.10.90",  component: "ci" }
+
+  tasks:
+    - name: Find Ecommerce HA host group
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: hostgroup.get
+          params:
+            output:
+              - groupid
+              - name
+            filter:
+              name:
+                - "{{ zabbix_group_name }}"
+          id: 1
+        return_content: true
+      register: zabbix_group_get
+      no_log: true
+
+    - name: Create Ecommerce HA host group
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: hostgroup.create
+          params:
+            name: "{{ zabbix_group_name }}"
+          id: 2
+        return_content: true
+      register: zabbix_group_create
+      when: zabbix_group_get.json.result | length == 0
+      no_log: true
+
+    - name: Set Zabbix host group ID
+      ansible.builtin.set_fact:
+        zabbix_group_id: >-
+          {{
+            zabbix_group_get.json.result[0].groupid
+            if zabbix_group_get.json.result | length > 0
+            else zabbix_group_create.json.result.groupids[0]
+          }}
+
+    - name: Find Linux template
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: template.get
+          params:
+            output:
+              - templateid
+              - host
+            filter:
+              host:
+                - "{{ zabbix_template_name }}"
+          id: 3
+        return_content: true
+      register: zabbix_template_get
+      no_log: true
+
+    - name: Validate Linux template
+      ansible.builtin.assert:
+        that:
+          - zabbix_template_get.json.result | length == 1
+        fail_msg: "Template 'Linux by Zabbix agent' was not found"
+        success_msg: "Linux template found"
+
+    - name: Set Linux template ID
+      ansible.builtin.set_fact:
+        zabbix_template_id: "{{ zabbix_template_get.json.result[0].templateid }}"
+
+    - name: Find existing infrastructure hosts
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: host.get
+          params:
+            output:
+              - hostid
+              - host
+            filter:
+              host: "{{ zabbix_hosts | map(attribute='name') | list }}"
+          id: 4
+        return_content: true
+      register: zabbix_existing_hosts
+      no_log: true
+
+    - name: Build existing hostname list
+      ansible.builtin.set_fact:
+        zabbix_existing_hostnames: >-
+          {{
+            zabbix_existing_hosts.json.result
+            | map(attribute='host')
+            | list
+          }}
+
+    - name: Create missing infrastructure hosts
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: host.create
+          params:
+            host: "{{ item.name }}"
+            name: "{{ item.name }}"
+            interfaces:
+              - type: 1
+                main: 1
+                useip: 1
+                ip: "{{ item.ip }}"
+                dns: ""
+                port: "10050"
+            groups:
+              - groupid: "{{ zabbix_group_id }}"
+            templates:
+              - templateid: "{{ zabbix_template_id }}"
+            tags:
+              - tag: project
+                value: ecommerce-ha-platform
+              - tag: environment
+                value: lab
+              - tag: component
+                value: "{{ item.component }}"
+          id: 10
+        return_content: true
+      loop: "{{ zabbix_hosts }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.name not in zabbix_existing_hostnames
+      no_log: true
+
+    - name: Verify registered hosts
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: host.get
+          params:
+            output:
+              - hostid
+              - host
+              - name
+            groupids:
+              - "{{ zabbix_group_id }}"
+            selectInterfaces:
+              - ip
+              - port
+              - available
+          id: 20
+        return_content: true
+      register: zabbix_registered_hosts
+      no_log: true
+
+    - name: Validate host count
+      ansible.builtin.assert:
+        that:
+          - zabbix_registered_hosts.json.result | length == 16
+        success_msg: "All 16 Ecommerce HA hosts are registered in Zabbix"
+        fail_msg: "Expected 16 hosts in Ecommerce HA Platform group"
+
+    - name: Show registered hosts
+      ansible.builtin.debug:
+        msg: >-
+          {{
+            zabbix_registered_hosts.json.result
+            | map(attribute='host')
+            | sort
+            | list
+          }}

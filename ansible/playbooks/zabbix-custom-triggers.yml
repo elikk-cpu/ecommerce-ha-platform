@@ -1,0 +1,113 @@
+---
+- name: Configure Ecommerce Zabbix triggers
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../vars/zabbix-vault.yml
+
+  vars:
+    zabbix_api_url: "http://10.10.10.70/api_jsonrpc.php"
+
+    ecommerce_triggers:
+      - description: "Ecommerce API app1 is not ready"
+        expression: 'last(/app1/ecommerce.app.ready)=0'
+        priority: 4
+
+      - description: "Ecommerce API app2 is not ready"
+        expression: 'last(/app2/ecommerce.app.ready)=0'
+        priority: 4
+
+      - description: "Keepalived VIP is missing from both load balancers"
+        expression: 'last(/lb1/ecommerce.vip.present)=0 and last(/lb2/ecommerce.vip.present)=0'
+        priority: 5
+
+      - description: "MinIO health check failed"
+        expression: 'last(/minio/ecommerce.minio.ready)=0'
+        priority: 4
+
+  tasks:
+    - name: Find existing Ecommerce triggers
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: trigger.get
+          params:
+            output:
+              - triggerid
+              - description
+            filter:
+              description:
+                - "{{ item.description }}"
+          id: 1
+        return_content: true
+      loop: "{{ ecommerce_triggers }}"
+      loop_control:
+        label: "{{ item.description }}"
+      register: trigger_lookup
+      no_log: true
+
+    - name: Create missing Ecommerce triggers
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: trigger.create
+          params:
+            description: "{{ item.item.description }}"
+            expression: "{{ item.item.expression }}"
+            priority: "{{ item.item.priority }}"
+            manual_close: 1
+          id: 2
+        return_content: true
+      loop: "{{ trigger_lookup.results }}"
+      loop_control:
+        label: "{{ item.item.description }}"
+      when: item.json.result | length == 0
+      no_log: true
+
+    - name: Verify Ecommerce triggers
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: trigger.get
+          params:
+            output:
+              - triggerid
+              - description
+              - priority
+            filter:
+              description:
+                - "Ecommerce API app1 is not ready"
+                - "Ecommerce API app2 is not ready"
+                - "Keepalived VIP is missing from both load balancers"
+                - "MinIO health check failed"
+          id: 3
+        return_content: true
+      register: trigger_verify
+      no_log: true
+
+    - name: Show Ecommerce triggers
+      ansible.builtin.debug:
+        msg: "{{ trigger_verify.json.result }}"

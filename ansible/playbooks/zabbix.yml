@@ -1,0 +1,10 @@
+---
+- name: Deploy Zabbix monitoring server
+  hosts: monitor
+  become: true
+
+  vars_files:
+    - ../vars/zabbix-vault.yml
+
+  roles:
+    - zabbix_server

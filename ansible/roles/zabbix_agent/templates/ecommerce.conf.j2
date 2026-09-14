@@ -1,0 +1,33 @@
+# Managed by Ansible
+
+{% if 'apps' in group_names %}
+UserParameter=ecommerce.app.ready,curl -fs --max-time 5 http://{{ app_bind_ip }}:8000/ready >/dev/null 2>&1 && echo 1 || echo 0
+{% endif %}
+
+{% if 'load_balancers' in group_names %}
+UserParameter=ecommerce.vip.present,ip -4 addr show | grep -qw '10.20.20.100/24' && echo 1 || echo 0
+{% endif %}
+
+{% if inventory_hostname == 'minio' %}
+UserParameter=ecommerce.minio.ready,curl -fsS --max-time 5 http://10.40.40.61:9000/minio/health/live >/dev/null && echo 1 || echo 0
+{% endif %}
+
+{% if 'databases' in group_names %}
+UserParameter=ecommerce.pg.role,sudo -n -u postgres /usr/local/bin/zabbix-postgresql-check role
+UserParameter=ecommerce.pg.replication,sudo -n -u postgres /usr/local/bin/zabbix-postgresql-check replication
+{% endif %}
+
+{% if inventory_hostname in ['redis1', 'redis2'] %}
+UserParameter=ecommerce.redis.role,sudo -n /usr/local/bin/zabbix-redis-check role
+UserParameter=ecommerce.redis.replication,sudo -n /usr/local/bin/zabbix-redis-check replication
+{% endif %}
+
+{% if 'redis_sentinels' in group_names %}
+UserParameter=ecommerce.redis.sentinel_quorum,sudo -n /usr/local/bin/zabbix-redis-check sentinel
+{% endif %}
+
+{% if 'rabbitmq' in group_names %}
+UserParameter=ecommerce.rabbit.node,cat /var/cache/zabbix-rabbitmq/node 2>/dev/null || echo 0
+UserParameter=ecommerce.rabbit.cluster,cat /var/cache/zabbix-rabbitmq/cluster 2>/dev/null || echo 0
+UserParameter=ecommerce.rabbit.quorum,cat /var/cache/zabbix-rabbitmq/quorum 2>/dev/null || echo 0
+{% endif %}

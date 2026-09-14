@@ -1,0 +1,318 @@
+---
+- name: Configure RabbitMQ HA monitoring in Zabbix
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../vars/zabbix-vault.yml
+
+  vars:
+    zabbix_api_url: "http://10.10.10.70/api_jsonrpc.php"
+
+    rabbitmq_items:
+      - { host: "rabbit1", name: "RabbitMQ node health", key: "ecommerce.rabbit.node" }
+      - { host: "rabbit1", name: "RabbitMQ cluster health", key: "ecommerce.rabbit.cluster" }
+      - { host: "rabbit1", name: "RabbitMQ quorum queue health", key: "ecommerce.rabbit.quorum" }
+
+      - { host: "rabbit2", name: "RabbitMQ node health", key: "ecommerce.rabbit.node" }
+      - { host: "rabbit2", name: "RabbitMQ cluster health", key: "ecommerce.rabbit.cluster" }
+      - { host: "rabbit2", name: "RabbitMQ quorum queue health", key: "ecommerce.rabbit.quorum" }
+
+      - { host: "rabbit3", name: "RabbitMQ node health", key: "ecommerce.rabbit.node" }
+      - { host: "rabbit3", name: "RabbitMQ cluster health", key: "ecommerce.rabbit.cluster" }
+      - { host: "rabbit3", name: "RabbitMQ quorum queue health", key: "ecommerce.rabbit.quorum" }
+
+  tasks:
+    - name: Get RabbitMQ hosts
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: host.get
+          params:
+            output:
+              - hostid
+              - host
+            filter:
+              host:
+                - rabbit1
+                - rabbit2
+                - rabbit3
+            selectInterfaces:
+              - interfaceid
+              - ip
+          id: 1
+        return_content: true
+      register: rabbit_hosts
+      no_log: true
+
+    - name: Build RabbitMQ host lookup
+      ansible.builtin.set_fact:
+        rabbit_host_lookup: >-
+          {{
+            rabbit_host_lookup | default({}) |
+            combine({
+              item.host: {
+                'hostid': item.hostid,
+                'interfaceid': item.interfaces[0].interfaceid
+              }
+            })
+          }}
+      loop: "{{ rabbit_hosts.json.result }}"
+      loop_control:
+        label: "{{ item.host }}"
+
+    - name: Find existing RabbitMQ items
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: item.get
+          params:
+            output:
+              - itemid
+              - key_
+            hostids:
+              - "{{ rabbit_host_lookup[item.host].hostid }}"
+            filter:
+              key_:
+                - "{{ item.key }}"
+          id: 2
+        return_content: true
+      loop: "{{ rabbitmq_items }}"
+      loop_control:
+        label: "{{ item.host }} / {{ item.key }}"
+      register: rabbit_existing_items
+      no_log: true
+
+    - name: Create missing RabbitMQ items
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: item.create
+          params:
+            name: "{{ item.item.name }}"
+            key_: "{{ item.item.key }}"
+            hostid: "{{ rabbit_host_lookup[item.item.host].hostid }}"
+            interfaceid: "{{ rabbit_host_lookup[item.item.host].interfaceid }}"
+            type: 0
+            value_type: 3
+            delay: "30s"
+            history: "7d"
+            trends: "30d"
+          id: 3
+        return_content: true
+      loop: "{{ rabbit_existing_items.results }}"
+      loop_control:
+        label: "{{ item.item.host }} / {{ item.item.key }}"
+      when: item.json.result | length == 0
+      no_log: true
+
+    - name: Find RabbitMQ triggers
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: trigger.get
+          params:
+            output:
+              - triggerid
+              - description
+            filter:
+              description:
+                - "RabbitMQ rabbit1 node is down"
+                - "RabbitMQ rabbit2 node is down"
+                - "RabbitMQ rabbit3 node is down"
+                - "RabbitMQ cluster has lost quorum"
+                - "RabbitMQ orders quorum queue is unhealthy"
+          id: 4
+        return_content: true
+      register: rabbit_triggers
+      no_log: true
+
+    - name: Create rabbit1 node trigger
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: trigger.create
+          params:
+            description: "RabbitMQ rabbit1 node is down"
+            expression: 'last(/rabbit1/ecommerce.rabbit.node)=0'
+            priority: 4
+            manual_close: 1
+          id: 5
+        return_content: true
+      when: >
+        rabbit_triggers.json.result
+        | selectattr('description', 'equalto', 'RabbitMQ rabbit1 node is down')
+        | list | length == 0
+      no_log: true
+
+    - name: Create rabbit2 node trigger
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: trigger.create
+          params:
+            description: "RabbitMQ rabbit2 node is down"
+            expression: 'last(/rabbit2/ecommerce.rabbit.node)=0'
+            priority: 4
+            manual_close: 1
+          id: 6
+        return_content: true
+      when: >
+        rabbit_triggers.json.result
+        | selectattr('description', 'equalto', 'RabbitMQ rabbit2 node is down')
+        | list | length == 0
+      no_log: true
+
+    - name: Create rabbit3 node trigger
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: trigger.create
+          params:
+            description: "RabbitMQ rabbit3 node is down"
+            expression: 'last(/rabbit3/ecommerce.rabbit.node)=0'
+            priority: 4
+            manual_close: 1
+          id: 7
+        return_content: true
+      when: >
+        rabbit_triggers.json.result
+        | selectattr('description', 'equalto', 'RabbitMQ rabbit3 node is down')
+        | list | length == 0
+      no_log: true
+
+    - name: Create RabbitMQ cluster quorum trigger
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: trigger.create
+          params:
+            description: "RabbitMQ cluster has lost quorum"
+            expression: 'last(/rabbit1/ecommerce.rabbit.cluster)=0 or last(/rabbit2/ecommerce.rabbit.cluster)=0 or last(/rabbit3/ecommerce.rabbit.cluster)=0'
+            priority: 5
+            manual_close: 1
+          id: 8
+        return_content: true
+      when: >
+        rabbit_triggers.json.result
+        | selectattr('description', 'equalto', 'RabbitMQ cluster has lost quorum')
+        | list | length == 0
+      no_log: true
+
+    - name: Create RabbitMQ queue quorum trigger
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: trigger.create
+          params:
+            description: "RabbitMQ orders quorum queue is unhealthy"
+            expression: 'last(/rabbit1/ecommerce.rabbit.quorum)=0 or last(/rabbit2/ecommerce.rabbit.quorum)=0 or last(/rabbit3/ecommerce.rabbit.quorum)=0'
+            priority: 5
+            manual_close: 1
+          id: 9
+        return_content: true
+      when: >
+        rabbit_triggers.json.result
+        | selectattr('description', 'equalto', 'RabbitMQ orders quorum queue is unhealthy')
+        | list | length == 0
+      no_log: true
+
+    - name: Verify RabbitMQ monitoring items
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: item.get
+          params:
+            output:
+              - itemid
+              - name
+              - key_
+              - lastvalue
+            hostids:
+              - "{{ rabbit_host_lookup['rabbit1'].hostid }}"
+              - "{{ rabbit_host_lookup['rabbit2'].hostid }}"
+              - "{{ rabbit_host_lookup['rabbit3'].hostid }}"
+            filter:
+              key_:
+                - "ecommerce.rabbit.node"
+                - "ecommerce.rabbit.cluster"
+                - "ecommerce.rabbit.quorum"
+          id: 10
+        return_content: true
+      register: rabbit_verify
+      no_log: true
+
+    - name: Show RabbitMQ monitoring items
+      ansible.builtin.debug:
+        msg: "{{ rabbit_verify.json.result }}"

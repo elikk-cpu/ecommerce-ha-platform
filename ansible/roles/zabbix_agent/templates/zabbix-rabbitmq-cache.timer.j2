@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh RabbitMQ Zabbix cache
+
+[Timer]
+OnBootSec=5s
+OnUnitActiveSec=20s
+AccuracySec=1s
+Unit=zabbix-rabbitmq-cache.service
+
+[Install]
+WantedBy=timers.target

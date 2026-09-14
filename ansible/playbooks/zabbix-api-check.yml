@@ -1,0 +1,69 @@
+---
+- name: Check Zabbix API
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../vars/zabbix-vault.yml
+
+  vars:
+    zabbix_api_url: "http://10.10.10.70/api_jsonrpc.php"
+
+  tasks:
+    - name: Validate Zabbix API token
+      ansible.builtin.assert:
+        that:
+          - vault_zabbix_api_token is defined
+          - vault_zabbix_api_token | length > 20
+        fail_msg: "Zabbix API token is missing"
+        success_msg: "Zabbix API token is loaded"
+      no_log: true
+
+    - name: Get Zabbix API version
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: apiinfo.version
+          params: {}
+          id: 1
+        return_content: true
+      register: zabbix_version
+
+    - name: Show API version
+      ansible.builtin.debug:
+        msg: "Zabbix API version: {{ zabbix_version.json.result }}"
+
+    - name: Test authenticated API request
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: host.get
+          params:
+            output:
+              - hostid
+              - host
+          id: 2
+        return_content: true
+      register: zabbix_hosts
+      no_log: true
+
+    - name: Confirm authenticated API access
+      ansible.builtin.assert:
+        that:
+          - zabbix_hosts.json.result is defined
+        success_msg: "Zabbix API authentication works"
+        fail_msg: "Zabbix API authentication failed"

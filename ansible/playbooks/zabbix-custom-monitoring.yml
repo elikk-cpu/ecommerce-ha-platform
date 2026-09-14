@@ -1,0 +1,139 @@
+---
+- name: Configure custom Ecommerce monitoring
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../vars/zabbix-vault.yml
+
+  vars:
+    zabbix_api_url: "http://10.10.10.70/api_jsonrpc.php"
+
+    custom_items:
+      - host: app1
+        name: "Ecommerce API readiness"
+        key: "ecommerce.app.ready"
+
+      - host: app2
+        name: "Ecommerce API readiness"
+        key: "ecommerce.app.ready"
+
+      - host: lb1
+        name: "Keepalived VIP ownership"
+        key: "ecommerce.vip.present"
+
+      - host: lb2
+        name: "Keepalived VIP ownership"
+        key: "ecommerce.vip.present"
+
+      - host: minio
+        name: "MinIO health"
+        key: "ecommerce.minio.ready"
+
+  tasks:
+    - name: Get required hosts
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: host.get
+          params:
+            output:
+              - hostid
+              - host
+            filter:
+              host:
+                - app1
+                - app2
+                - lb1
+                - lb2
+                - minio
+            selectInterfaces:
+              - interfaceid
+              - ip
+          id: 1
+        return_content: true
+      register: monitored_hosts
+      no_log: true
+
+    - name: Create host lookup
+      ansible.builtin.set_fact:
+        host_lookup: >-
+          {{
+            host_lookup | default({}) |
+            combine({
+              item.host: {
+                'hostid': item.hostid,
+                'interfaceid': item.interfaces[0].interfaceid
+              }
+            })
+          }}
+      loop: "{{ monitored_hosts.json.result }}"
+      loop_control:
+        label: "{{ item.host }}"
+
+    - name: Find existing custom items
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: item.get
+          params:
+            output:
+              - itemid
+              - key_
+            hostids:
+              - "{{ host_lookup[item.host].hostid }}"
+            filter:
+              key_:
+                - "{{ item.key }}"
+          id: 10
+        return_content: true
+      loop: "{{ custom_items }}"
+      loop_control:
+        label: "{{ item.host }} / {{ item.key }}"
+      register: existing_items
+      no_log: true
+
+    - name: Create missing custom items
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: item.create
+          params:
+            name: "{{ item.item.name }}"
+            key_: "{{ item.item.key }}"
+            hostid: "{{ host_lookup[item.item.host].hostid }}"
+            interfaceid: "{{ host_lookup[item.item.host].interfaceid }}"
+            type: 0
+            value_type: 3
+            delay: "30s"
+            history: "7d"
+            trends: "30d"
+          id: 20
+        return_content: true
+      loop: "{{ existing_items.results }}"
+      loop_control:
+        label: "{{ item.item.host }} / {{ item.item.key }}"
+      when: item.json.result | length == 0
+      no_log: true

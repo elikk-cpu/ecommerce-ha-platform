@@ -1,0 +1,103 @@
+---
+- name: Validate Zabbix hosts
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../vars/zabbix-vault.yml
+
+  vars:
+    zabbix_api_url: "http://10.10.10.70/api_jsonrpc.php"
+    zabbix_group_name: "Ecommerce HA Platform"
+
+  tasks:
+    - name: Get Ecommerce HA Platform group
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: hostgroup.get
+          params:
+            output:
+              - groupid
+              - name
+            filter:
+              name:
+                - "{{ zabbix_group_name }}"
+          id: 1
+        return_content: true
+      register: group_result
+      no_log: true
+
+    - name: Validate host group
+      ansible.builtin.assert:
+        that:
+          - group_result.json.result | length == 1
+        fail_msg: "Ecommerce HA Platform group not found"
+
+    - name: Set host group ID
+      ansible.builtin.set_fact:
+        zabbix_group_id: "{{ group_result.json.result[0].groupid }}"
+
+    - name: Get Ecommerce HA hosts and interfaces
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: host.get
+          params:
+            output:
+              - hostid
+              - host
+            groupids:
+              - "{{ zabbix_group_id }}"
+            selectInterfaces:
+              - ip
+              - port
+              - available
+              - error
+          id: 2
+        return_content: true
+      register: hosts_result
+      no_log: true
+
+    - name: Show agent availability
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.host }} |
+          {{ item.interfaces[0].ip }} |
+          available={{ item.interfaces[0].available }} |
+          error={{ item.interfaces[0].error | default('') }}
+      loop: "{{ hosts_result.json.result }}"
+      loop_control:
+        label: "{{ item.host }}"
+
+    - name: Validate host count
+      ansible.builtin.assert:
+        that:
+          - hosts_result.json.result | length == 16
+        success_msg: "All 16 Ecommerce HA hosts exist in Zabbix"
+        fail_msg: "Expected exactly 16 hosts in Ecommerce HA Platform group"
+
+    - name: Validate all agents are available
+      ansible.builtin.assert:
+        that:
+          - item.interfaces[0].available | string == "1"
+        fail_msg: "{{ item.host }} Zabbix agent is unavailable"
+        success_msg: "{{ item.host }} agent is available"
+      loop: "{{ hosts_result.json.result }}"
+      loop_control:
+        label: "{{ item.host }}"

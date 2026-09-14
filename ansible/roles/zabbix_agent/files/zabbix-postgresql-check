@@ -1,0 +1,47 @@
+#!/bin/bash
+
+set -euo pipefail
+
+case "${1:-}" in
+  role)
+    psql -Atqc "
+      SELECT CASE
+        WHEN pg_is_in_recovery() THEN 0
+        ELSE 1
+      END;
+    "
+    ;;
+
+  replication)
+    if [ "$(psql -Atqc "SELECT pg_is_in_recovery();")" = "f" ]; then
+      psql -Atqc "
+        SELECT CASE
+          WHEN EXISTS (
+            SELECT 1
+            FROM pg_stat_replication
+            WHERE state = 'streaming'
+          )
+          THEN 1
+          ELSE 0
+        END;
+      "
+    else
+      psql -Atqc "
+        SELECT CASE
+          WHEN EXISTS (
+            SELECT 1
+            FROM pg_stat_wal_receiver
+            WHERE status = 'streaming'
+          )
+          THEN 1
+          ELSE 0
+        END;
+      "
+    fi
+    ;;
+
+  *)
+    echo "Usage: $0 {role|replication}" >&2
+    exit 1
+    ;;
+esac

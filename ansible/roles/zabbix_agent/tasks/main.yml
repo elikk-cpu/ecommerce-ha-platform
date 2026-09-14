@@ -1,0 +1,173 @@
+---
+- name: Download Zabbix repository package
+  ansible.builtin.get_url:
+    url: https://repo.zabbix.com/zabbix/7.0/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest_7.0+ubuntu24.04_all.deb
+    dest: /tmp/zabbix-release.deb
+    mode: "0644"
+
+- name: Install Zabbix repository
+  ansible.builtin.apt:
+    deb: /tmp/zabbix-release.deb
+    state: present
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Install Zabbix Agent2
+  ansible.builtin.apt:
+    name: zabbix-agent2
+    state: present
+
+- name: Configure Zabbix Server address
+  ansible.builtin.lineinfile:
+    path: /etc/zabbix/zabbix_agent2.conf
+    regexp: '^Server='
+    line: 'Server=10.10.10.70'
+  notify: Restart Zabbix Agent2
+
+- name: Configure active Zabbix Server address
+  ansible.builtin.lineinfile:
+    path: /etc/zabbix/zabbix_agent2.conf
+    regexp: '^ServerActive='
+    line: 'ServerActive=10.10.10.70'
+  notify: Restart Zabbix Agent2
+
+- name: Configure Zabbix hostname
+  ansible.builtin.lineinfile:
+    path: /etc/zabbix/zabbix_agent2.conf
+    regexp: '^Hostname='
+    line: 'Hostname={{ inventory_hostname }}'
+  notify: Restart Zabbix Agent2
+
+- name: Deploy PostgreSQL Zabbix helper
+  ansible.builtin.copy:
+    src: zabbix-postgresql-check
+    dest: /usr/local/bin/zabbix-postgresql-check
+    owner: root
+    group: root
+    mode: "0755"
+  when: inventory_hostname in groups['databases']
+
+- name: Allow Zabbix PostgreSQL monitoring helper
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/zabbix-postgresql
+    owner: root
+    group: root
+    mode: "0440"
+    content: |
+      zabbix ALL=(postgres) NOPASSWD: /usr/local/bin/zabbix-postgresql-check *
+    validate: '/usr/sbin/visudo -cf %s'
+  when: inventory_hostname in groups['databases']
+
+- name: Deploy Redis Zabbix helper
+  ansible.builtin.copy:
+    src: zabbix-redis-check
+    dest: /usr/local/bin/zabbix-redis-check
+    owner: root
+    group: root
+    mode: "0755"
+  when: inventory_hostname in groups['redis_sentinels']
+
+- name: Allow Zabbix Redis monitoring helper
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/zabbix-redis
+    owner: root
+    group: root
+    mode: "0440"
+    content: |
+      zabbix ALL=(root) NOPASSWD: /usr/local/bin/zabbix-redis-check *
+    validate: '/usr/sbin/visudo -cf %s'
+  when: inventory_hostname in groups['redis_sentinels']
+
+- name: Deploy RabbitMQ Zabbix helper
+  ansible.builtin.copy:
+    src: zabbix-rabbitmq-check
+    dest: /usr/local/bin/zabbix-rabbitmq-check
+    owner: root
+    group: root
+    mode: "0755"
+  when: "'rabbitmq' in group_names"
+
+- name: Create RabbitMQ Zabbix cache directory
+  ansible.builtin.file:
+    path: /var/cache/zabbix-rabbitmq
+    state: directory
+    owner: rabbitmq
+    group: zabbix
+    mode: "0750"
+  when: "'rabbitmq' in group_names"
+
+- name: Deploy RabbitMQ cache updater
+  ansible.builtin.copy:
+    src: zabbix-rabbitmq-cache-update
+    dest: /usr/local/bin/zabbix-rabbitmq-cache-update
+    owner: root
+    group: root
+    mode: "0755"
+  when: "'rabbitmq' in group_names"
+
+- name: Deploy RabbitMQ Zabbix cache service
+  ansible.builtin.template:
+    src: zabbix-rabbitmq-cache.service.j2
+    dest: /etc/systemd/system/zabbix-rabbitmq-cache.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: "'rabbitmq' in group_names"
+
+- name: Deploy RabbitMQ Zabbix cache timer
+  ansible.builtin.template:
+    src: zabbix-rabbitmq-cache.timer.j2
+    dest: /etc/systemd/system/zabbix-rabbitmq-cache.timer
+    owner: root
+    group: root
+    mode: "0644"
+  when: "'rabbitmq' in group_names"
+
+- name: Remove obsolete RabbitMQ Zabbix sudo rule
+  ansible.builtin.file:
+    path: /etc/sudoers.d/zabbix-rabbitmq
+    state: absent
+  when: "'rabbitmq' in group_names"
+
+- name: Reload systemd for RabbitMQ cache units
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: "'rabbitmq' in group_names"
+
+- name: Populate RabbitMQ Zabbix cache now
+  ansible.builtin.systemd:
+    name: zabbix-rabbitmq-cache.service
+    state: started
+  when: "'rabbitmq' in group_names"
+
+- name: Enable RabbitMQ Zabbix cache timer
+  ansible.builtin.systemd:
+    name: zabbix-rabbitmq-cache.timer
+    state: started
+    enabled: true
+  when: "'rabbitmq' in group_names"
+
+- name: Deploy ecommerce custom Zabbix checks
+  ansible.builtin.template:
+    src: ecommerce.conf.j2
+    dest: /etc/zabbix/zabbix_agent2.d/ecommerce.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Zabbix Agent2
+
+- name: Increase Zabbix Agent2 timeout for RabbitMQ checks
+  ansible.builtin.lineinfile:
+    path: /etc/zabbix/zabbix_agent2.conf
+    regexp: '^\s*#?\s*Timeout='
+    line: 'Timeout=10'
+  notify: Restart Zabbix Agent2
+  when: "'rabbitmq' in group_names"
+
+- name: Ensure Zabbix Agent2 is enabled and running
+  ansible.builtin.service:
+    name: zabbix-agent2
+    state: started
+    enabled: true

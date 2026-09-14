@@ -1,0 +1,56 @@
+---
+- name: Force RabbitMQ Zabbix checks
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../vars/zabbix-vault.yml
+
+  vars:
+    zabbix_api_url: "http://10.10.10.70/api_jsonrpc.php"
+
+  tasks:
+    - name: Execute RabbitMQ checks now
+      ansible.builtin.uri:
+        url: "{{ zabbix_api_url }}"
+        method: POST
+        headers:
+          Content-Type: application/json-rpc
+          Authorization: "Bearer {{ vault_zabbix_api_token }}"
+          Host: zabbix.ecom.test
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: task.create
+          params:
+            - type: 6
+              request:
+                itemid: "52635"
+            - type: 6
+              request:
+                itemid: "52636"
+            - type: 6
+              request:
+                itemid: "52638"
+            - type: 6
+              request:
+                itemid: "52639"
+            - type: 6
+              request:
+                itemid: "52641"
+            - type: 6
+              request:
+                itemid: "52642"
+          id: 1
+        return_content: true
+      register: execute_result
+      no_log: true
+
+    - name: Confirm Execute now tasks
+      ansible.builtin.debug:
+        msg: "RabbitMQ immediate checks were queued"
+
+    - name: Wait for checks
+      ansible.builtin.pause:
+        seconds: 20

@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh RabbitMQ health cache for Zabbix
+After=rabbitmq-server.service
+Requires=rabbitmq-server.service
+
+[Service]
+Type=oneshot
+User=rabbitmq
+Group=rabbitmq
+ExecStart=/usr/local/bin/zabbix-rabbitmq-cache-update
+TimeoutStartSec=30

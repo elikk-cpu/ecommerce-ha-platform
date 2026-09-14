@@ -1,0 +1,105 @@
+#!/bin/bash
+
+set -euo pipefail
+
+get_password() {
+    awk '/^requirepass / {
+        gsub(/"/, "", $2)
+        print $2
+        exit
+    }' /etc/redis/redis.conf
+}
+
+case "${1:-}" in
+    role)
+        PASS="$(get_password)"
+
+        ROLE="$(
+            redis-cli \
+                --no-auth-warning \
+                -a "$PASS" \
+                ROLE 2>/dev/null |
+            head -1
+        )"
+
+        case "$ROLE" in
+            master)
+                echo 1
+                ;;
+            slave)
+                echo 0
+                ;;
+            *)
+                echo 2
+                ;;
+        esac
+        ;;
+
+    replication)
+        PASS="$(get_password)"
+
+        ROLE="$(
+            redis-cli \
+                --no-auth-warning \
+                -a "$PASS" \
+                ROLE 2>/dev/null |
+            head -1
+        )"
+
+        if [ "$ROLE" = "master" ]; then
+            CONNECTED="$(
+                redis-cli \
+                    --no-auth-warning \
+                    -a "$PASS" \
+                    INFO replication 2>/dev/null |
+                awk -F: '/^connected_slaves:/ {
+                    gsub("\r", "", $2)
+                    print $2
+                }'
+            )"
+
+            if [ "${CONNECTED:-0}" -ge 1 ]; then
+                echo 1
+            else
+                echo 0
+            fi
+
+        elif [ "$ROLE" = "slave" ]; then
+            STATUS="$(
+                redis-cli \
+                    --no-auth-warning \
+                    -a "$PASS" \
+                    INFO replication 2>/dev/null |
+                awk -F: '/^master_link_status:/ {
+                    gsub("\r", "", $2)
+                    print $2
+                }'
+            )"
+
+            if [ "$STATUS" = "up" ]; then
+                echo 1
+            else
+                echo 0
+            fi
+
+        else
+            echo 0
+        fi
+        ;;
+
+    sentinel)
+        if redis-cli -p 26379 \
+            SENTINEL ckquorum ecommerce-master 2>/dev/null |
+            grep -q '^OK '
+        then
+            echo 1
+        else
+            echo 0
+        fi
+        ;;
+
+    *)
+        echo "Usage: $0 {role|replication|sentinel}" >&2
+        exit 1
+        ;;
+esac

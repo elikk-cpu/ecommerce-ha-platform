@@ -1,0 +1,64 @@
+#!/bin/bash
+
+set -euo pipefail
+
+case "${1:-}" in
+    node)
+        if rabbitmq-diagnostics -q ping >/dev/null 2>&1; then
+            echo 1
+        else
+            echo 0
+        fi
+        ;;
+
+    cluster)
+        RUNNING="$(
+            rabbitmqctl cluster_status 2>/dev/null |
+            awk '
+                /Running Nodes/ {flag=1; next}
+                /Versions/ {flag=0}
+                flag && /rabbit@rabbit/ {count++}
+                END {print count+0}
+            '
+        )"
+
+        if [ "${RUNNING:-0}" -ge 2 ]; then
+            echo 1
+        else
+            echo 0
+        fi
+        ;;
+
+    quorum)
+        OUTPUT="$(
+            rabbitmq-queues quorum_status \
+                --vhost /ecommerce \
+                orders 2>/dev/null || true
+        )"
+
+        MEMBERS="$(
+            printf '%s\n' "$OUTPUT" |
+            grep -E 'leader|follower' |
+            grep -v 'nodedown' |
+            wc -l
+        )"
+
+        LEADERS="$(
+            printf '%s\n' "$OUTPUT" |
+            grep -w 'leader' |
+            grep -v 'nodedown' |
+            wc -l
+        )"
+
+        if [ "$MEMBERS" -ge 2 ] && [ "$LEADERS" -eq 1 ]; then
+            echo 1
+        else
+            echo 0
+        fi
+        ;;
+
+    *)
+        echo "Usage: $0 {node|cluster|quorum}" >&2
+        exit 1
+        ;;
+esac
