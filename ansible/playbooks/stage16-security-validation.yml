@@ -1,0 +1,134 @@
+---
+- name: Validate HAProxy security
+  hosts: "lb1:lb2"
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check HAProxy service
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - haproxy
+      register: haproxy_service
+      changed_when: false
+      failed_when: haproxy_service.stdout != "active"
+
+    - name: Validate HAProxy configuration
+      ansible.builtin.command:
+        argv:
+          - haproxy
+          - -c
+          - -f
+          - /etc/haproxy/haproxy.cfg
+      changed_when: false
+
+
+- name: Validate application HTTPS VIP
+  hosts: bastion
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check HTTPS health through VIP
+      ansible.builtin.uri:
+        url: https://10.20.20.100/health
+        method: GET
+        ca_path: /etc/ecommerce-pki/ca/ecommerce-root-ca.crt
+        status_code: 200
+        return_content: true
+      register: vip_health
+
+    - name: Show VIP result
+      ansible.builtin.debug:
+        msg: "HTTPS VIP OK: {{ vip_health.json }}"
+
+
+- name: Validate OpenSearch security
+  hosts: logging
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../vars/opensearch-vault.yml
+
+  tasks:
+    - name: Check OpenSearch service
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - opensearch
+      register: opensearch_service
+      changed_when: false
+      failed_when: opensearch_service.stdout != "active"
+
+    - name: Verify anonymous OpenSearch access is denied
+      ansible.builtin.uri:
+        url: https://10.10.10.80:9200/
+        ca_path: /etc/opensearch/certs/ecommerce-root-ca.crt
+        status_code: 401
+
+    - name: Verify authenticated OpenSearch cluster health
+      ansible.builtin.uri:
+        url: https://10.10.10.80:9200/_cluster/health
+        user: admin
+        password: "{{ vault_opensearch_admin_password }}"
+        force_basic_auth: true
+        ca_path: /etc/opensearch/certs/ecommerce-root-ca.crt
+        status_code: 200
+        return_content: true
+      register: cluster_health
+      no_log: true
+
+    - name: Require healthy cluster
+      ansible.builtin.assert:
+        that:
+          - cluster_health.json.status in ['green', 'yellow']
+        success_msg: "OpenSearch security and cluster health: OK"
+
+    - name: Verify temporary superadmin credentials are absent
+      ansible.builtin.stat:
+        path: /run/opensearch-security-admin
+      register: superadmin_tmp
+
+    - name: Require superadmin cleanup
+      ansible.builtin.assert:
+        that:
+          - not superadmin_tmp.stat.exists
+        success_msg: "Temporary superadmin credentials: absent"
+
+    - name: Check Dashboards service
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - opensearch-dashboards
+      register: dashboards_service
+      changed_when: false
+      failed_when: dashboards_service.stdout != "active"
+
+    - name: Verify Dashboards HTTPS login protection
+      ansible.builtin.uri:
+        url: https://10.10.10.80:5601/
+        ca_path: /etc/opensearch-dashboards/certs/ecommerce-root-ca.crt
+        follow_redirects: none
+        status_code: 302
+
+
+- name: Validate Fluent Bit
+  hosts: apps
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check Fluent Bit service
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - fluent-bit
+      register: fluentbit_service
+      changed_when: false
+      failed_when: fluentbit_service.stdout != "active"

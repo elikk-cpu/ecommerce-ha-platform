@@ -1,0 +1,138 @@
+---
+- name: Issue OpenSearch certificates
+  hosts: bastion
+  become: true
+  gather_facts: false
+
+  vars:
+    pki_root: /etc/ecommerce-pki
+    ca_cert: /etc/ecommerce-pki/ca/ecommerce-root-ca.crt
+    ca_key: /etc/ecommerce-pki/ca/ecommerce-root-ca.key
+
+  tasks:
+    - name: Create CSR directory
+      ansible.builtin.file:
+        path: /etc/ecommerce-pki/csr
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    # =========================
+    # OpenSearch node
+    # =========================
+
+    - name: Generate OpenSearch node private key
+      ansible.builtin.command:
+        cmd: >
+          openssl genpkey
+          -algorithm RSA
+          -pkeyopt rsa_keygen_bits:2048
+          -out /etc/ecommerce-pki/private/opensearch-node.key
+      args:
+        creates: /etc/ecommerce-pki/private/opensearch-node.key
+
+    - name: Protect OpenSearch node private key
+      ansible.builtin.file:
+        path: /etc/ecommerce-pki/private/opensearch-node.key
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Generate OpenSearch node CSR
+      ansible.builtin.command:
+        cmd: >
+          openssl req
+          -new
+          -key /etc/ecommerce-pki/private/opensearch-node.key
+          -out /etc/ecommerce-pki/csr/opensearch-node.csr
+          -subj "/O=Ecommerce HA Platform/OU=Infrastructure/CN=logging"
+      args:
+        creates: /etc/ecommerce-pki/csr/opensearch-node.csr
+
+    - name: Create OpenSearch node certificate extensions
+      ansible.builtin.copy:
+        dest: /etc/ecommerce-pki/csr/opensearch-node.ext
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          basicConstraints=critical,CA:FALSE
+          keyUsage=critical,digitalSignature,keyEncipherment
+          extendedKeyUsage=serverAuth,clientAuth
+          subjectAltName=DNS:logging,IP:10.10.10.80
+
+    - name: Sign OpenSearch node certificate
+      ansible.builtin.command:
+        cmd: >
+          openssl x509
+          -req
+          -in /etc/ecommerce-pki/csr/opensearch-node.csr
+          -CA /etc/ecommerce-pki/ca/ecommerce-root-ca.crt
+          -CAkey /etc/ecommerce-pki/ca/ecommerce-root-ca.key
+          -CAcreateserial
+          -out /etc/ecommerce-pki/issued/opensearch-node.crt
+          -days 825
+          -sha256
+          -extfile /etc/ecommerce-pki/csr/opensearch-node.ext
+      args:
+        creates: /etc/ecommerce-pki/issued/opensearch-node.crt
+
+    # =========================
+    # OpenSearch admin
+    # =========================
+
+    - name: Generate OpenSearch admin private key
+      ansible.builtin.command:
+        cmd: >
+          openssl genpkey
+          -algorithm RSA
+          -pkeyopt rsa_keygen_bits:2048
+          -out /etc/ecommerce-pki/private/opensearch-admin.key
+      args:
+        creates: /etc/ecommerce-pki/private/opensearch-admin.key
+
+    - name: Protect OpenSearch admin private key
+      ansible.builtin.file:
+        path: /etc/ecommerce-pki/private/opensearch-admin.key
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Generate OpenSearch admin CSR
+      ansible.builtin.command:
+        cmd: >
+          openssl req
+          -new
+          -key /etc/ecommerce-pki/private/opensearch-admin.key
+          -out /etc/ecommerce-pki/csr/opensearch-admin.csr
+          -subj "/O=Ecommerce HA Platform/OU=Security/CN=opensearch-admin"
+      args:
+        creates: /etc/ecommerce-pki/csr/opensearch-admin.csr
+
+    - name: Create OpenSearch admin certificate extensions
+      ansible.builtin.copy:
+        dest: /etc/ecommerce-pki/csr/opensearch-admin.ext
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          basicConstraints=critical,CA:FALSE
+          keyUsage=critical,digitalSignature,keyEncipherment
+          extendedKeyUsage=clientAuth
+
+    - name: Sign OpenSearch admin certificate
+      ansible.builtin.command:
+        cmd: >
+          openssl x509
+          -req
+          -in /etc/ecommerce-pki/csr/opensearch-admin.csr
+          -CA /etc/ecommerce-pki/ca/ecommerce-root-ca.crt
+          -CAkey /etc/ecommerce-pki/ca/ecommerce-root-ca.key
+          -CAcreateserial
+          -out /etc/ecommerce-pki/issued/opensearch-admin.crt
+          -days 825
+          -sha256
+          -extfile /etc/ecommerce-pki/csr/opensearch-admin.ext
+      args:
+        creates: /etc/ecommerce-pki/issued/opensearch-admin.crt

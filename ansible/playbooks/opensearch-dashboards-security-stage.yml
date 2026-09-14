@@ -1,0 +1,77 @@
+---
+- name: Read Root CA from bastion
+  hosts: bastion
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Read Ecommerce Root CA
+      ansible.builtin.slurp:
+        src: /etc/ecommerce-pki/ca/ecommerce-root-ca.crt
+      register: ecommerce_root_ca
+
+
+- name: Stage secure OpenSearch Dashboards configuration
+  hosts: logging
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../vars/opensearch-vault.yml
+
+  tasks:
+    - name: Create Dashboards certificate directory
+      ansible.builtin.file:
+        path: /etc/opensearch-dashboards/certs
+        state: directory
+        owner: root
+        group: opensearch-dashboards
+        mode: "0750"
+
+    - name: Deploy Ecommerce Root CA
+      ansible.builtin.copy:
+        content: "{{ hostvars['bastion']['ecommerce_root_ca']['content'] | b64decode }}"
+        dest: /etc/opensearch-dashboards/certs/ecommerce-root-ca.crt
+        owner: root
+        group: opensearch-dashboards
+        mode: "0640"
+
+    - name: Stage secure Dashboards configuration
+      ansible.builtin.template:
+        src: ../templates/opensearch-dashboards-secure.yml.j2
+        dest: /etc/opensearch-dashboards/opensearch_dashboards.yml.stage16
+        owner: root
+        group: opensearch-dashboards
+        mode: "0640"
+
+    - name: Create Dashboards secret environment file
+      ansible.builtin.copy:
+        dest: /etc/default/opensearch-dashboards-stage16
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          OPENSEARCH_DASHBOARDS_PASSWORD={{ vault_opensearch_kibanaserver_password }}
+      no_log: true
+
+    - name: Create systemd override directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/opensearch-dashboards.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Stage Dashboards environment override
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/opensearch-dashboards.service.d/10-stage16-env.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Service]
+          EnvironmentFile=/etc/default/opensearch-dashboards-stage16
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

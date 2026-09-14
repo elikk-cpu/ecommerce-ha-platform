@@ -1,0 +1,43 @@
+---
+- name: Read HAProxy TLS material from bastion
+  hosts: bastion
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Read HAProxy certificate
+      ansible.builtin.slurp:
+        src: /etc/ecommerce-pki/issued/haproxy-vip.crt
+      register: haproxy_cert
+
+    - name: Read HAProxy private key
+      ansible.builtin.slurp:
+        src: /etc/ecommerce-pki/private/haproxy-vip.key
+      register: haproxy_key
+      no_log: true
+
+
+- name: Deploy HAProxy TLS PEM
+  hosts: "lb1:lb2"
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Create HAProxy certificate directory
+      ansible.builtin.file:
+        path: /etc/haproxy/certs
+        state: directory
+        owner: root
+        group: haproxy
+        mode: "0750"
+
+    - name: Deploy combined HAProxy PEM
+      ansible.builtin.copy:
+        content: |
+          {{ hostvars['bastion']['haproxy_cert']['content'] | b64decode }}
+          {{ hostvars['bastion']['haproxy_key']['content'] | b64decode }}
+        dest: /etc/haproxy/certs/ecommerce-vip.pem
+        owner: root
+        group: haproxy
+        mode: "0640"
+      no_log: true

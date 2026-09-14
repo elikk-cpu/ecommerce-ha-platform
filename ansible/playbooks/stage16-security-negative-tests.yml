@@ -1,0 +1,99 @@
+---
+- name: Negative tests for external VIP
+  hosts: bastion
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: HTTP must redirect to HTTPS
+      ansible.builtin.uri:
+        url: http://10.20.20.100/health
+        method: GET
+        follow_redirects: none
+        status_code: 301
+      register: http_redirect
+
+    - name: Confirm HTTP redirect
+      ansible.builtin.assert:
+        that:
+          - http_redirect.status == 301
+          - "'https://10.20.20.100/health' in http_redirect.location"
+        success_msg: "HTTP -> HTTPS redirect: OK"
+
+
+- name: Negative tests for OpenSearch
+  hosts: logging
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../vars/opensearch-vault.yml
+
+  tasks:
+    - name: Plain HTTP to OpenSearch must fail
+      ansible.builtin.shell: |
+        curl \
+          --connect-timeout 5 \
+          -s -o /dev/null \
+          -w "%{http_code}" \
+          http://10.10.10.80:9200 || true
+      register: opensearch_http
+      changed_when: false
+
+    - name: Require plain HTTP to be unavailable
+      ansible.builtin.assert:
+        that:
+          - opensearch_http.stdout == "000"
+        success_msg: "OpenSearch plaintext HTTP: BLOCKED"
+
+    - name: Anonymous HTTPS access must be denied
+      ansible.builtin.uri:
+        url: https://10.10.10.80:9200/
+        method: GET
+        ca_path: /etc/opensearch/certs/ecommerce-root-ca.crt
+        status_code: 401
+
+    - name: Confirm anonymous access test
+      ansible.builtin.debug:
+        msg: "Anonymous OpenSearch access: DENIED (401)"
+
+    - name: Wrong admin password must be denied
+      ansible.builtin.uri:
+        url: https://10.10.10.80:9200/
+        method: GET
+        user: admin
+        password: "STAGE16_INTENTIONALLY_WRONG_PASSWORD"
+        force_basic_auth: true
+        ca_path: /etc/opensearch/certs/ecommerce-root-ca.crt
+        status_code: 401
+
+    - name: Confirm wrong password test
+      ansible.builtin.debug:
+        msg: "Invalid admin credentials: DENIED (401)"
+
+    - name: Fluent Bit user must not read application logs
+      ansible.builtin.uri:
+        url: "https://10.10.10.80:9200/ecommerce-app-*/_search?size=1"
+        method: GET
+        user: fluentbit
+        password: "{{ vault_opensearch_fluentbit_password }}"
+        force_basic_auth: true
+        ca_path: /etc/opensearch/certs/ecommerce-root-ca.crt
+        status_code: 403
+      no_log: true
+
+    - name: Confirm Fluent Bit least privilege
+      ansible.builtin.debug:
+        msg: "Fluent Bit read access: DENIED (403) - least privilege OK"
+
+    - name: Dashboards without login must redirect
+      ansible.builtin.uri:
+        url: https://10.10.10.80:5601/
+        method: GET
+        ca_path: /etc/opensearch-dashboards/certs/ecommerce-root-ca.crt
+        follow_redirects: none
+        status_code: 302
+
+    - name: Confirm Dashboards authentication protection
+      ansible.builtin.debug:
+        msg: "Anonymous Dashboards access: REDIRECTED TO LOGIN"

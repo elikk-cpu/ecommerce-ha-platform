@@ -1,0 +1,32 @@
+server.name: "ecommerce-logs"
+server.host: "10.10.10.80"
+server.port: 5601
+
+# Browser -> Dashboards пока HTTP.
+# HTTPS самого UI включим отдельным шагом 16.6.
+server.ssl.enabled: false
+
+# Dashboards -> OpenSearch
+opensearch.hosts:
+  - "https://10.10.10.80:9200"
+
+opensearch.ssl.verificationMode: full
+opensearch.ssl.certificateAuthorities:
+  - "/etc/opensearch-dashboards/certs/ecommerce-root-ca.crt"
+
+opensearch.username: "kibanaserver"
+opensearch.password: "${OPENSEARCH_DASHBOARDS_PASSWORD}"
+
+opensearch.requestHeadersAllowlist:
+  - authorization
+  - securitytenant
+
+opensearch_security.multitenancy.enabled: true
+opensearch_security.multitenancy.tenants.preferred:
+  - Private
+  - Global
+
+opensearch_security.readonly_mode.roles:
+  - kibana_read_only
+
+opensearch_security.cookie.secure: false

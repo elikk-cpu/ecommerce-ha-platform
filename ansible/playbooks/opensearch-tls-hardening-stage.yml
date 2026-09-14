@@ -1,0 +1,44 @@
+---
+- name: Stage OpenSearch TLS hardening
+  hosts: logging
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Create staged OpenSearch hardened config
+      ansible.builtin.copy:
+        src: /etc/opensearch/opensearch.yml
+        dest: /etc/opensearch/opensearch.yml.hardened-stage16
+        remote_src: true
+        owner: root
+        group: opensearch
+        mode: "0640"
+
+    - name: Add OpenSearch TLS protocol hardening
+      ansible.builtin.blockinfile:
+        path: /etc/opensearch/opensearch.yml.hardened-stage16
+        marker: "# {mark} STAGE16 TLS HARDENING"
+        block: |
+          plugins.security.ssl.http.enabled_protocols:
+            - "TLSv1.2"
+            - "TLSv1.3"
+
+          plugins.security.ssl.transport.enabled_protocols:
+            - "TLSv1.2"
+            - "TLSv1.3"
+
+    - name: Create staged Dashboards hardened config
+      ansible.builtin.copy:
+        src: /etc/opensearch-dashboards/opensearch_dashboards.yml
+        dest: /etc/opensearch-dashboards/opensearch_dashboards.yml.hardened-stage16
+        remote_src: true
+        owner: root
+        group: opensearch-dashboards
+        mode: "0640"
+
+    - name: Restrict Dashboards TLS protocols
+      ansible.builtin.lineinfile:
+        path: /etc/opensearch-dashboards/opensearch_dashboards.yml.hardened-stage16
+        regexp: '^server\.ssl\.supportedProtocols:'
+        insertafter: '^server\.ssl\.enabled:'
+        line: 'server.ssl.supportedProtocols: ["TLSv1.2", "TLSv1.3"]'

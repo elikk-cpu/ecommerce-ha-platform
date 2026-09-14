@@ -1,0 +1,24 @@
+---
+- name: Stage secure OpenSearch configuration
+  hosts: logging
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Backup current OpenSearch configuration
+      ansible.builtin.copy:
+        src: /etc/opensearch/opensearch.yml
+        dest: /etc/opensearch/opensearch.yml.pre-stage16
+        remote_src: true
+        owner: root
+        group: opensearch
+        mode: "0640"
+        force: false
+
+    - name: Stage secure OpenSearch configuration
+      ansible.builtin.template:
+        src: ../templates/opensearch-secure.yml.j2
+        dest: /etc/opensearch/opensearch.yml.stage16
+        owner: root
+        group: opensearch
+        mode: "0640"

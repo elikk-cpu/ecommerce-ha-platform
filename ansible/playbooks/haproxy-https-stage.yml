@@ -1,0 +1,46 @@
+---
+- name: Stage HAProxy HTTPS configuration
+  hosts: "lb1:lb2"
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Backup current HAProxy configuration
+      ansible.builtin.copy:
+        src: /etc/haproxy/haproxy.cfg
+        dest: /etc/haproxy/haproxy.cfg.pre-stage16
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+        force: false
+
+    - name: Create staged HAProxy configuration
+      ansible.builtin.copy:
+        src: /etc/haproxy/haproxy.cfg
+        dest: /etc/haproxy/haproxy.cfg.stage16
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Add HTTPS bind to staged configuration
+      ansible.builtin.lineinfile:
+        path: /etc/haproxy/haproxy.cfg.stage16
+        insertafter: '^\s*bind\s+\*:80\s*$'
+        regexp: '^\s*bind\s+\*:443\s+ssl\b.*$'
+        line: '    bind *:443 ssl crt /etc/haproxy/certs/ecommerce-vip.pem'
+
+    - name: Validate staged HAProxy configuration
+      ansible.builtin.command:
+        argv:
+          - haproxy
+          - -c
+          - -f
+          - /etc/haproxy/haproxy.cfg.stage16
+      register: haproxy_validation
+      changed_when: false
+
+    - name: Show validation result
+      ansible.builtin.debug:
+        var: haproxy_validation.stdout_lines

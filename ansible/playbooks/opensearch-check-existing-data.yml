@@ -1,0 +1,28 @@
+---
+- name: Check existing OpenSearch data
+  hosts: logging
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../vars/opensearch-vault.yml
+
+  tasks:
+    - name: Get indices
+      ansible.builtin.uri:
+        url: "https://10.10.10.80:9200/_cat/indices?format=json"
+        user: admin
+        password: "{{ vault_opensearch_admin_password }}"
+        force_basic_auth: true
+        ca_path: /etc/opensearch/certs/ecommerce-root-ca.crt
+        return_content: true
+      register: indices
+      no_log: true
+
+    - name: Show ecommerce and Dashboards indices
+      ansible.builtin.debug:
+        msg: >-
+          {{ indices.json
+             | selectattr('index', 'match', '^(ecommerce-|\\.kibana)')
+             | map(attribute='index')
+             | list }}

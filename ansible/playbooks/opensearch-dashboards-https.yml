@@ -1,0 +1,54 @@
+---
+- name: Enable HTTPS for OpenSearch Dashboards
+  hosts: logging
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Backup pre-HTTPS Dashboards configuration
+      ansible.builtin.copy:
+        src: /etc/opensearch-dashboards/opensearch_dashboards.yml
+        dest: /etc/opensearch-dashboards/opensearch_dashboards.yml.pre-https
+        remote_src: true
+        owner: root
+        group: opensearch-dashboards
+        mode: "0640"
+        force: false
+
+    - name: Enable Dashboards HTTPS
+      ansible.builtin.lineinfile:
+        path: /etc/opensearch-dashboards/opensearch_dashboards.yml
+        regexp: '^server\.ssl\.enabled:'
+        line: 'server.ssl.enabled: true'
+
+    - name: Configure Dashboards HTTPS certificate
+      ansible.builtin.lineinfile:
+        path: /etc/opensearch-dashboards/opensearch_dashboards.yml
+        insertafter: '^server\.ssl\.enabled:'
+        regexp: '^server\.ssl\.certificate:'
+        line: 'server.ssl.certificate: "/etc/opensearch-dashboards/certs/opensearch-dashboards.crt"'
+
+    - name: Configure Dashboards HTTPS private key
+      ansible.builtin.lineinfile:
+        path: /etc/opensearch-dashboards/opensearch_dashboards.yml
+        insertafter: '^server\.ssl\.certificate:'
+        regexp: '^server\.ssl\.key:'
+        line: 'server.ssl.key: "/etc/opensearch-dashboards/certs/opensearch-dashboards.key"'
+
+    - name: Enable secure Security plugin cookie
+      ansible.builtin.lineinfile:
+        path: /etc/opensearch-dashboards/opensearch_dashboards.yml
+        regexp: '^opensearch_security\.cookie\.secure:'
+        line: 'opensearch_security.cookie.secure: true'
+
+    - name: Restart OpenSearch Dashboards
+      ansible.builtin.systemd:
+        name: opensearch-dashboards
+        state: restarted
+
+    - name: Wait for HTTPS port
+      ansible.builtin.wait_for:
+        host: 10.10.10.80
+        port: 5601
+        delay: 3
+        timeout: 90

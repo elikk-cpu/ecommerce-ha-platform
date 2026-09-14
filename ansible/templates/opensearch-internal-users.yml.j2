@@ -1,0 +1,23 @@
+---
+_meta:
+  type: "internalusers"
+  config_version: 2
+
+admin:
+  hash: "{{ opensearch_admin_hash }}"
+  reserved: true
+  backend_roles:
+    - "admin"
+  description: "Ecommerce OpenSearch administrator"
+
+kibanaserver:
+  hash: "{{ opensearch_kibanaserver_hash }}"
+  reserved: true
+  description: "OpenSearch Dashboards service user"
+
+fluentbit:
+  hash: "{{ opensearch_fluentbit_hash }}"
+  reserved: false
+  backend_roles: []
+  description: "Fluent Bit log shipper"
+

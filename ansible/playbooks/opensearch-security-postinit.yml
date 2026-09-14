@@ -1,0 +1,42 @@
+---
+- name: Verify OpenSearch admin authentication and remove temporary superadmin key
+  hosts: logging
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../vars/opensearch-vault.yml
+
+  tasks:
+    - name: Verify admin basic authentication
+      ansible.builtin.uri:
+        url: https://10.10.10.80:9200/_cluster/health
+        method: GET
+        user: admin
+        password: "{{ vault_opensearch_admin_password }}"
+        force_basic_auth: true
+        ca_path: /etc/opensearch/certs/ecommerce-root-ca.crt
+        return_content: true
+        status_code: 200
+      register: admin_auth_test
+      no_log: true
+
+    - name: Confirm admin authentication succeeded
+      ansible.builtin.debug:
+        msg: "OpenSearch admin basic authentication: OK"
+
+    - name: Remove temporary superadmin certificate and private key
+      ansible.builtin.file:
+        path: /run/opensearch-security-admin
+        state: absent
+
+    - name: Verify temporary admin credentials were removed
+      ansible.builtin.stat:
+        path: /run/opensearch-security-admin
+      register: admin_tmp
+
+    - name: Confirm cleanup
+      ansible.builtin.assert:
+        that:
+          - not admin_tmp.stat.exists
+        success_msg: "Temporary superadmin credentials removed from logging"

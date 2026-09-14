@@ -1,0 +1,53 @@
+---
+- name: Validate secure log ingestion
+  hosts: logging
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../vars/opensearch-vault.yml
+
+  tasks:
+    - name: Search Stage 16 test log records
+      ansible.builtin.uri:
+        url: "https://10.10.10.80:9200/ecommerce-system-*/_search"
+        method: POST
+        user: admin
+        password: "{{ vault_opensearch_admin_password }}"
+        force_basic_auth: true
+        ca_path: /etc/opensearch/certs/ecommerce-root-ca.crt
+        body_format: json
+        body:
+          size: 20
+          query:
+            bool:
+              should:
+                - match_phrase:
+                    MESSAGE: "STAGE16_TLS_HARDENING_TEST_app1"
+                - match_phrase:
+                    MESSAGE: "STAGE16_TLS_HARDENING_TEST_app2"
+              minimum_should_match: 1
+        status_code: 200
+        return_content: true
+      register: secure_logs
+      no_log: true
+
+    - name: Show secure ingestion result
+      ansible.builtin.debug:
+        msg: "Secure Fluent Bit ingestion hits: {{ secure_logs.json.hits.total.value }}"
+
+    - name: Show found hosts
+      ansible.builtin.debug:
+        msg: >-
+          host={{ item._source.host | default('unknown') }}
+          message={{ item._source.MESSAGE | default('no MESSAGE') }}
+      loop: "{{ secure_logs.json.hits.hits }}"
+      loop_control:
+        label: "{{ item._source.host | default('unknown') }}"
+
+    - name: Require at least two test records
+      ansible.builtin.assert:
+        that:
+          - secure_logs.json.hits.total.value | int >= 2
+        success_msg: "Secure Fluent Bit -> OpenSearch ingestion: OK"
+        fail_msg: "Expected secure logs from app1 and app2 were not found"

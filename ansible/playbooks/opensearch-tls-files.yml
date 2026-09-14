@@ -1,0 +1,62 @@
+---
+- name: Read OpenSearch TLS files from bastion
+  hosts: bastion
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Read Root CA certificate
+      ansible.builtin.slurp:
+        src: /etc/ecommerce-pki/ca/ecommerce-root-ca.crt
+      register: root_ca
+
+    - name: Read OpenSearch node certificate
+      ansible.builtin.slurp:
+        src: /etc/ecommerce-pki/issued/opensearch-node.crt
+      register: opensearch_node_cert
+
+    - name: Read OpenSearch node private key
+      ansible.builtin.slurp:
+        src: /etc/ecommerce-pki/private/opensearch-node.key
+      register: opensearch_node_key
+      no_log: true
+
+
+- name: Deploy OpenSearch TLS files
+  hosts: logging
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Create OpenSearch certificate directory
+      ansible.builtin.file:
+        path: /etc/opensearch/certs
+        state: directory
+        owner: root
+        group: opensearch
+        mode: "0750"
+
+    - name: Deploy Root CA certificate
+      ansible.builtin.copy:
+        content: "{{ hostvars['bastion']['root_ca']['content'] | b64decode }}"
+        dest: /etc/opensearch/certs/ecommerce-root-ca.crt
+        owner: root
+        group: opensearch
+        mode: "0640"
+
+    - name: Deploy OpenSearch node certificate
+      ansible.builtin.copy:
+        content: "{{ hostvars['bastion']['opensearch_node_cert']['content'] | b64decode }}"
+        dest: /etc/opensearch/certs/opensearch-node.crt
+        owner: root
+        group: opensearch
+        mode: "0640"
+
+    - name: Deploy OpenSearch node private key
+      ansible.builtin.copy:
+        content: "{{ hostvars['bastion']['opensearch_node_key']['content'] | b64decode }}"
+        dest: /etc/opensearch/certs/opensearch-node.key
+        owner: opensearch
+        group: opensearch
+        mode: "0600"
+      no_log: true

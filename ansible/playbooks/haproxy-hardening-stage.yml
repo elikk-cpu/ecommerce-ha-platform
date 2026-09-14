@@ -1,0 +1,42 @@
+---
+- name: Stage HAProxy security hardening
+  hosts: "lb1:lb2"
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Create staged hardened configuration
+      ansible.builtin.copy:
+        src: /etc/haproxy/haproxy.cfg
+        dest: /etc/haproxy/haproxy.cfg.hardened-stage16
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Enforce minimum TLS 1.2 on HTTPS listener
+      ansible.builtin.lineinfile:
+        path: /etc/haproxy/haproxy.cfg.hardened-stage16
+        regexp: '^\s*bind\s+\*:443\s+ssl\b.*$'
+        line: '    bind *:443 ssl crt /etc/haproxy/certs/ecommerce-vip.pem ssl-min-ver TLSv1.2'
+
+    - name: Add security response headers
+      ansible.builtin.blockinfile:
+        path: /etc/haproxy/haproxy.cfg.hardened-stage16
+        insertafter: '^\s*http-request redirect scheme https code 301 unless \{ ssl_fc \}\s*$'
+        marker: '    # {mark} STAGE16 SECURITY HEADERS'
+        block: |2
+              http-response set-header Strict-Transport-Security "max-age=31536000; includeSubDomains" if { ssl_fc }
+              http-response set-header X-Content-Type-Options "nosniff"
+              http-response set-header X-Frame-Options "DENY"
+              http-response set-header Referrer-Policy "no-referrer"
+
+    - name: Validate hardened HAProxy configuration
+      ansible.builtin.command:
+        argv:
+          - haproxy
+          - -c
+          - -f
+          - /etc/haproxy/haproxy.cfg.hardened-stage16
+      changed_when: false
+

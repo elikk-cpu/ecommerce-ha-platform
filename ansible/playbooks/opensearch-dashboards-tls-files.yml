@@ -1,0 +1,49 @@
+---
+- name: Read Dashboards TLS files from bastion
+  hosts: bastion
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Read Dashboards certificate
+      ansible.builtin.slurp:
+        src: /etc/ecommerce-pki/issued/opensearch-dashboards.crt
+      register: dashboards_cert
+
+    - name: Read Dashboards private key
+      ansible.builtin.slurp:
+        src: /etc/ecommerce-pki/private/opensearch-dashboards.key
+      register: dashboards_key
+      no_log: true
+
+
+- name: Deploy Dashboards TLS files
+  hosts: logging
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Ensure Dashboards certificate directory exists
+      ansible.builtin.file:
+        path: /etc/opensearch-dashboards/certs
+        state: directory
+        owner: root
+        group: opensearch-dashboards
+        mode: "0750"
+
+    - name: Deploy Dashboards certificate
+      ansible.builtin.copy:
+        content: "{{ hostvars['bastion']['dashboards_cert']['content'] | b64decode }}"
+        dest: /etc/opensearch-dashboards/certs/opensearch-dashboards.crt
+        owner: opensearch-dashboards
+        group: opensearch-dashboards
+        mode: "0644"
+
+    - name: Deploy Dashboards private key
+      ansible.builtin.copy:
+        content: "{{ hostvars['bastion']['dashboards_key']['content'] | b64decode }}"
+        dest: /etc/opensearch-dashboards/certs/opensearch-dashboards.key
+        owner: opensearch-dashboards
+        group: opensearch-dashboards
+        mode: "0600"
+      no_log: true

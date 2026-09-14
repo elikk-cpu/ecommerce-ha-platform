@@ -1,0 +1,113 @@
+---
+- name: Prepare OpenSearch security users and roles
+  hosts: logging
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../vars/opensearch-vault.yml
+
+  tasks:
+    - name: Create security backup directory
+      ansible.builtin.file:
+        path: /etc/opensearch/security-backup-pre-stage16
+        state: directory
+        owner: root
+        group: opensearch
+        mode: "0750"
+
+    - name: Backup current security configuration
+      ansible.builtin.copy:
+        src: "/etc/opensearch/opensearch-security/{{ item }}"
+        dest: "/etc/opensearch/security-backup-pre-stage16/{{ item }}"
+        remote_src: true
+        owner: root
+        group: opensearch
+        mode: "0640"
+        force: false
+      loop:
+        - internal_users.yml
+        - roles.yml
+        - roles_mapping.yml
+
+    - name: Generate admin password hash
+      ansible.builtin.command:
+        argv:
+          - /usr/share/opensearch/plugins/opensearch-security/tools/hash.sh
+          - -p
+          - "{{ vault_opensearch_admin_password }}"
+      environment:
+        OPENSEARCH_JAVA_HOME: /usr/share/opensearch/jdk
+      register: admin_hash
+      changed_when: false
+      no_log: true
+
+    - name: Generate Dashboards password hash
+      ansible.builtin.command:
+        argv:
+          - /usr/share/opensearch/plugins/opensearch-security/tools/hash.sh
+          - -p
+          - "{{ vault_opensearch_kibanaserver_password }}"
+      environment:
+        OPENSEARCH_JAVA_HOME: /usr/share/opensearch/jdk
+      register: kibanaserver_hash
+      changed_when: false
+      no_log: true
+
+    - name: Generate Fluent Bit password hash
+      ansible.builtin.command:
+        argv:
+          - /usr/share/opensearch/plugins/opensearch-security/tools/hash.sh
+          - -p
+          - "{{ vault_opensearch_fluentbit_password }}"
+      environment:
+        OPENSEARCH_JAVA_HOME: /usr/share/opensearch/jdk
+      register: fluentbit_hash
+      changed_when: false
+      no_log: true
+
+    - name: Deploy internal users
+      ansible.builtin.template:
+        src: ../templates/opensearch-internal-users.yml.j2
+        dest: /etc/opensearch/opensearch-security/internal_users.yml
+        owner: root
+        group: opensearch
+        mode: "0640"
+      vars:
+        opensearch_admin_hash: "{{ admin_hash.stdout }}"
+        opensearch_kibanaserver_hash: "{{ kibanaserver_hash.stdout }}"
+        opensearch_fluentbit_hash: "{{ fluentbit_hash.stdout }}"
+      no_log: true
+
+    - name: Add Fluent Bit writer role
+      ansible.builtin.blockinfile:
+        path: /etc/opensearch/opensearch-security/roles.yml
+        marker: "# {mark} ECOMMERCE FLUENTBIT ROLE"
+        block: |
+          fluentbit_writer:
+            reserved: false
+            hidden: false
+            cluster_permissions:
+              - "cluster_composite_ops"
+            index_permissions:
+              - index_patterns:
+                  - "ecommerce-app-*"
+                  - "ecommerce-system-*"
+                allowed_actions:
+                  - "create_index"
+                  - "index"
+            tenant_permissions: []
+
+    - name: Add Fluent Bit role mapping
+      ansible.builtin.blockinfile:
+        path: /etc/opensearch/opensearch-security/roles_mapping.yml
+        marker: "# {mark} ECOMMERCE FLUENTBIT MAPPING"
+        block: |
+          fluentbit_writer:
+            reserved: false
+            hidden: false
+            backend_roles: []
+            hosts: []
+            users:
+              - "fluentbit"
+            and_backend_roles: []

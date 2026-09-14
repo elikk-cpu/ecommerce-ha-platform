@@ -1,0 +1,58 @@
+---
+- name: Activate secure Fluent Bit -> OpenSearch connection
+  hosts: apps
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../vars/opensearch-vault.yml
+
+  tasks:
+    - name: Backup current Fluent Bit configuration
+      ansible.builtin.copy:
+        src: /etc/fluent-bit/fluent-bit.conf
+        dest: /etc/fluent-bit/fluent-bit.conf.pre-stage16
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+        force: false
+
+    - name: Validate staged Fluent Bit configuration
+      ansible.builtin.command:
+        argv:
+          - /opt/fluent-bit/bin/fluent-bit
+          - --dry-run
+          - -c
+          - /etc/fluent-bit/fluent-bit.conf.stage16
+      environment:
+        FLUENTBIT_OPENSEARCH_PASSWORD: "{{ vault_opensearch_fluentbit_password }}"
+      changed_when: false
+      no_log: true
+
+    - name: Activate secure Fluent Bit configuration
+      ansible.builtin.copy:
+        src: /etc/fluent-bit/fluent-bit.conf.stage16
+        dest: /etc/fluent-bit/fluent-bit.conf
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Restart Fluent Bit
+      ansible.builtin.systemd:
+        name: fluent-bit
+        state: restarted
+        daemon_reload: true
+
+    - name: Wait for Fluent Bit
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - fluent-bit
+      register: fluentbit_status
+      changed_when: false
+      retries: 5
+      delay: 2
+      until: fluentbit_status.stdout == "active"

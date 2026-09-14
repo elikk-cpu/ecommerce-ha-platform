@@ -1,0 +1,35 @@
+cluster.name: ecommerce-logs
+node.name: logging
+
+network.host: 10.10.10.80
+http.port: 9200
+
+discovery.type: single-node
+
+path.data: /var/lib/opensearch
+path.logs: /var/log/opensearch
+
+# =========================
+# OpenSearch Security
+# =========================
+
+plugins.security.ssl.transport.pemcert_filepath: certs/opensearch-node.crt
+plugins.security.ssl.transport.pemkey_filepath: certs/opensearch-node.key
+plugins.security.ssl.transport.pemtrustedcas_filepath: certs/ecommerce-root-ca.crt
+plugins.security.ssl.transport.enforce_hostname_verification: true
+
+plugins.security.ssl.http.enabled: true
+plugins.security.ssl.http.pemcert_filepath: certs/opensearch-node.crt
+plugins.security.ssl.http.pemkey_filepath: certs/opensearch-node.key
+plugins.security.ssl.http.pemtrustedcas_filepath: certs/ecommerce-root-ca.crt
+plugins.security.ssl.http.clientauth_mode: OPTIONAL
+
+plugins.security.authcz.admin_dn:
+  - 'CN=opensearch-admin,OU=Security,O=Ecommerce HA Platform'
+
+plugins.security.nodes_dn:
+  - 'CN=logging,OU=Infrastructure,O=Ecommerce HA Platform'
+
+plugins.security.restapi.roles_enabled:
+  - all_access
+  - security_rest_api_access

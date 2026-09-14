@@ -1,0 +1,45 @@
+---
+- name: Activate HAProxy HTTP to HTTPS redirect
+  hosts: "lb1:lb2"
+  become: true
+  gather_facts: false
+  serial: 1
+
+  tasks:
+    - name: Validate staged redirect configuration
+      ansible.builtin.command:
+        argv:
+          - haproxy
+          - -c
+          - -f
+          - /etc/haproxy/haproxy.cfg.redirect-stage16
+      changed_when: false
+
+    - name: Activate redirect configuration
+      ansible.builtin.copy:
+        src: /etc/haproxy/haproxy.cfg.redirect-stage16
+        dest: /etc/haproxy/haproxy.cfg
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload HAProxy
+
+    - name: Apply reload
+      ansible.builtin.meta: flush_handlers
+
+    - name: Verify HAProxy service
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - haproxy
+      register: haproxy_status
+      changed_when: false
+      failed_when: haproxy_status.stdout != "active"
+
+  handlers:
+    - name: Reload HAProxy
+      ansible.builtin.systemd:
+        name: haproxy
+        state: reloaded

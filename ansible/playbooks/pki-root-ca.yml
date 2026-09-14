@@ -1,0 +1,70 @@
+---
+- name: Create internal Root CA
+  hosts: bastion
+  become: true
+  gather_facts: false
+
+  vars:
+    pki_root: /etc/ecommerce-pki
+    ca_dir: /etc/ecommerce-pki/ca
+
+  tasks:
+    - name: Install OpenSSL
+      ansible.builtin.apt:
+        name: openssl
+        state: present
+        update_cache: true
+
+    - name: Create PKI directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "/etc/ecommerce-pki", mode: "0755" }
+        - { path: "/etc/ecommerce-pki/ca", mode: "0700" }
+        - { path: "/etc/ecommerce-pki/private", mode: "0700" }
+        - { path: "/etc/ecommerce-pki/issued", mode: "0755" }
+
+    - name: Generate Root CA private key
+      ansible.builtin.command:
+        cmd: >
+          openssl genpkey
+          -algorithm RSA
+          -pkeyopt rsa_keygen_bits:4096
+          -out /etc/ecommerce-pki/ca/ecommerce-root-ca.key
+      args:
+        creates: /etc/ecommerce-pki/ca/ecommerce-root-ca.key
+
+    - name: Protect Root CA private key
+      ansible.builtin.file:
+        path: /etc/ecommerce-pki/ca/ecommerce-root-ca.key
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Generate Root CA certificate
+      ansible.builtin.command:
+        cmd: >
+          openssl req
+          -x509
+          -new
+          -sha256
+          -days 3650
+          -key /etc/ecommerce-pki/ca/ecommerce-root-ca.key
+          -out /etc/ecommerce-pki/ca/ecommerce-root-ca.crt
+          -subj "/O=Ecommerce HA Platform/OU=Infrastructure/CN=Ecommerce HA Root CA"
+          -addext "basicConstraints=critical,CA:TRUE"
+          -addext "keyUsage=critical,keyCertSign,cRLSign"
+          -addext "subjectKeyIdentifier=hash"
+      args:
+        creates: /etc/ecommerce-pki/ca/ecommerce-root-ca.crt
+
+    - name: Set Root CA certificate permissions
+      ansible.builtin.file:
+        path: /etc/ecommerce-pki/ca/ecommerce-root-ca.crt
+        owner: root
+        group: root
+        mode: "0644"

@@ -1,0 +1,82 @@
+---
+- name: Issue OpenSearch Dashboards HTTPS certificate
+  hosts: bastion
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Generate Dashboards private key
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - genrsa
+          - -out
+          - /etc/ecommerce-pki/private/opensearch-dashboards.key
+          - "4096"
+      args:
+        creates: /etc/ecommerce-pki/private/opensearch-dashboards.key
+      no_log: true
+
+    - name: Protect Dashboards private key
+      ansible.builtin.file:
+        path: /etc/ecommerce-pki/private/opensearch-dashboards.key
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Generate Dashboards CSR
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - req
+          - -new
+          - -key
+          - /etc/ecommerce-pki/private/opensearch-dashboards.key
+          - -out
+          - /etc/ecommerce-pki/csr/opensearch-dashboards.csr
+          - -subj
+          - /O=Ecommerce HA Platform/OU=Observability/CN=logging.ecom.test
+      args:
+        creates: /etc/ecommerce-pki/csr/opensearch-dashboards.csr
+
+    - name: Create Dashboards certificate extensions
+      ansible.builtin.copy:
+        dest: /etc/ecommerce-pki/csr/opensearch-dashboards.ext
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          basicConstraints=critical,CA:FALSE
+          keyUsage=critical,digitalSignature,keyEncipherment
+          extendedKeyUsage=serverAuth
+          subjectAltName=DNS:logging,DNS:logging.ecom.test,IP:10.10.10.80,IP:127.0.0.1
+
+    - name: Sign Dashboards certificate with Ecommerce Root CA
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -req
+          - -in
+          - /etc/ecommerce-pki/csr/opensearch-dashboards.csr
+          - -CA
+          - /etc/ecommerce-pki/ca/ecommerce-root-ca.crt
+          - -CAkey
+          - /etc/ecommerce-pki/ca/ecommerce-root-ca.key
+          - -CAcreateserial
+          - -out
+          - /etc/ecommerce-pki/issued/opensearch-dashboards.crt
+          - -days
+          - "825"
+          - -sha256
+          - -extfile
+          - /etc/ecommerce-pki/csr/opensearch-dashboards.ext
+      args:
+        creates: /etc/ecommerce-pki/issued/opensearch-dashboards.crt
+
+    - name: Set Dashboards certificate permissions
+      ansible.builtin.file:
+        path: /etc/ecommerce-pki/issued/opensearch-dashboards.crt
+        owner: root
+        group: root
+        mode: "0644"

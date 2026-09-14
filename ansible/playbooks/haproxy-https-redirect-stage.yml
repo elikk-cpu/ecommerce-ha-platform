@@ -1,0 +1,31 @@
+---
+- name: Stage HAProxy HTTP to HTTPS redirect
+  hosts: "lb1:lb2"
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Create staged redirect configuration
+      ansible.builtin.copy:
+        src: /etc/haproxy/haproxy.cfg
+        dest: /etc/haproxy/haproxy.cfg.redirect-stage16
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Add HTTP to HTTPS redirect
+      ansible.builtin.lineinfile:
+        path: /etc/haproxy/haproxy.cfg.redirect-stage16
+        insertafter: '^\s*bind\s+\*:443\s+ssl\b.*$'
+        regexp: '^\s*http-request redirect scheme https code 301 unless \{ ssl_fc \}\s*$'
+        line: '    http-request redirect scheme https code 301 unless { ssl_fc }'
+
+    - name: Validate staged HAProxy configuration
+      ansible.builtin.command:
+        argv:
+          - haproxy
+          - -c
+          - -f
+          - /etc/haproxy/haproxy.cfg.redirect-stage16
+      changed_when: false

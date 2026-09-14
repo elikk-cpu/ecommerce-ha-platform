@@ -1,0 +1,41 @@
+---
+- name: Activate secure OpenSearch Dashboards
+  hosts: logging
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Backup current Dashboards configuration
+      ansible.builtin.copy:
+        src: /etc/opensearch-dashboards/opensearch_dashboards.yml
+        dest: /etc/opensearch-dashboards/opensearch_dashboards.yml.pre-stage16
+        remote_src: true
+        owner: root
+        group: opensearch-dashboards
+        mode: "0640"
+        force: false
+
+    - name: Activate staged secure Dashboards configuration
+      ansible.builtin.copy:
+        src: /etc/opensearch-dashboards/opensearch_dashboards.yml.stage16
+        dest: /etc/opensearch-dashboards/opensearch_dashboards.yml
+        remote_src: true
+        owner: root
+        group: opensearch-dashboards
+        mode: "0640"
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Start OpenSearch Dashboards
+      ansible.builtin.systemd:
+        name: opensearch-dashboards
+        state: started
+
+    - name: Wait for Dashboards port
+      ansible.builtin.wait_for:
+        host: 10.10.10.80
+        port: 5601
+        delay: 3
+        timeout: 90

@@ -1,0 +1,61 @@
+---
+- name: Activate OpenSearch TLS hardening
+  hosts: logging
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../vars/opensearch-vault.yml
+
+  tasks:
+    - name: Backup current OpenSearch config before TLS hardening
+      ansible.builtin.copy:
+        src: /etc/opensearch/opensearch.yml
+        dest: /etc/opensearch/opensearch.yml.pre-tls-hardening
+        remote_src: true
+        owner: root
+        group: opensearch
+        mode: "0640"
+        force: false
+
+    - name: Activate hardened OpenSearch config
+      ansible.builtin.copy:
+        src: /etc/opensearch/opensearch.yml.hardened-stage16
+        dest: /etc/opensearch/opensearch.yml
+        remote_src: true
+        owner: root
+        group: opensearch
+        mode: "0640"
+
+    - name: Restart OpenSearch
+      ansible.builtin.systemd:
+        name: opensearch
+        state: restarted
+
+    - name: Wait for OpenSearch HTTPS port
+      ansible.builtin.wait_for:
+        host: 10.10.10.80
+        port: 9200
+        delay: 5
+        timeout: 120
+
+    - name: Wait for authenticated OpenSearch API
+      ansible.builtin.uri:
+        url: https://10.10.10.80:9200/_cluster/health
+        user: admin
+        password: "{{ vault_opensearch_admin_password }}"
+        force_basic_auth: true
+        ca_path: /etc/opensearch/certs/ecommerce-root-ca.crt
+        status_code: 200
+        return_content: true
+      register: cluster_health
+      retries: 12
+      delay: 5
+      until:
+        - cluster_health.status == 200
+        - cluster_health.json.status in ['green', 'yellow']
+      no_log: true
+
+    - name: Show OpenSearch result
+      ansible.builtin.debug:
+        msg: "OpenSearch TLS hardening active; cluster={{ cluster_health.json.status }}"

@@ -1,0 +1,128 @@
+---
+- name: Read temporary admin certificate from bastion
+  hosts: bastion
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Read admin certificate
+      ansible.builtin.slurp:
+        src: /etc/ecommerce-pki/issued/opensearch-admin.crt
+      register: admin_cert
+
+    - name: Read admin private key
+      ansible.builtin.slurp:
+        src: /etc/ecommerce-pki/private/opensearch-admin.key
+      register: admin_key
+      no_log: true
+
+
+- name: Stop logging clients before security cutover
+  hosts: apps
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Stop Fluent Bit
+      ansible.builtin.systemd:
+        name: fluent-bit
+        state: stopped
+
+
+- name: Enable OpenSearch Security and initialize security index
+  hosts: logging
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../vars/opensearch-vault.yml
+
+  tasks:
+    - name: Stop OpenSearch Dashboards
+      ansible.builtin.systemd:
+        name: opensearch-dashboards
+        state: stopped
+
+    - name: Create temporary admin certificate directory
+      ansible.builtin.file:
+        path: /run/opensearch-security-admin
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Deploy temporary admin certificate
+      ansible.builtin.copy:
+        content: "{{ hostvars['bastion']['admin_cert']['content'] | b64decode }}"
+        dest: /run/opensearch-security-admin/opensearch-admin.crt
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Deploy temporary admin private key
+      ansible.builtin.copy:
+        content: "{{ hostvars['bastion']['admin_key']['content'] | b64decode }}"
+        dest: /run/opensearch-security-admin/opensearch-admin.key
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Activate secure OpenSearch configuration
+      ansible.builtin.copy:
+        src: /etc/opensearch/opensearch.yml.stage16
+        dest: /etc/opensearch/opensearch.yml
+        remote_src: true
+        owner: root
+        group: opensearch
+        mode: "0640"
+
+    - name: Restart OpenSearch with Security enabled
+      ansible.builtin.systemd:
+        name: opensearch
+        state: restarted
+
+    - name: Wait for HTTPS port
+      ansible.builtin.wait_for:
+        host: 10.10.10.80
+        port: 9200
+        delay: 5
+        timeout: 90
+
+    - name: Initialize OpenSearch Security index
+      ansible.builtin.command:
+        argv:
+          - /usr/share/opensearch/plugins/opensearch-security/tools/securityadmin.sh
+          - -cd
+          - /etc/opensearch/opensearch-security
+          - -icl
+          - -h
+          - 10.10.10.80
+          - -p
+          - "9200"
+          - -cacert
+          - /etc/opensearch/certs/ecommerce-root-ca.crt
+          - -cert
+          - /run/opensearch-security-admin/opensearch-admin.crt
+          - -key
+          - /run/opensearch-security-admin/opensearch-admin.key
+      environment:
+        OPENSEARCH_JAVA_HOME: /usr/share/opensearch/jdk
+      register: securityadmin_result
+      changed_when: true
+
+    - name: Verify admin authentication
+      ansible.builtin.uri:
+        url: https://10.10.10.80:9200/_cluster/health
+        method: GET
+        user: admin
+        password: "{{ vault_opensearch_admin_password }}"
+        force_basic_auth: true
+        ca_path: /etc/opensearch/certs/ecommerce-root-ca.crt
+        status_code: 200
+      no_log: true
+
+    - name: Remove temporary admin credentials
+      ansible.builtin.file:
+        path: /run/opensearch-security-admin
+        state: absent

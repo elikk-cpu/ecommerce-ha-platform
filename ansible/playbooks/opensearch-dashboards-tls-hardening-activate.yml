@@ -1,0 +1,47 @@
+---
+- name: Activate OpenSearch Dashboards TLS hardening
+  hosts: logging
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Backup current Dashboards config before TLS hardening
+      ansible.builtin.copy:
+        src: /etc/opensearch-dashboards/opensearch_dashboards.yml
+        dest: /etc/opensearch-dashboards/opensearch_dashboards.yml.pre-tls-hardening
+        remote_src: true
+        owner: root
+        group: opensearch-dashboards
+        mode: "0640"
+        force: false
+
+    - name: Activate hardened Dashboards config
+      ansible.builtin.copy:
+        src: /etc/opensearch-dashboards/opensearch_dashboards.yml.hardened-stage16
+        dest: /etc/opensearch-dashboards/opensearch_dashboards.yml
+        remote_src: true
+        owner: root
+        group: opensearch-dashboards
+        mode: "0640"
+
+    - name: Restart OpenSearch Dashboards
+      ansible.builtin.systemd:
+        name: opensearch-dashboards
+        state: restarted
+
+    - name: Wait for Dashboards HTTPS port
+      ansible.builtin.wait_for:
+        host: 10.10.10.80
+        port: 5601
+        delay: 3
+        timeout: 90
+
+    - name: Verify Dashboards service
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - opensearch-dashboards
+      register: dashboards_status
+      changed_when: false
+      failed_when: dashboards_status.stdout != "active"

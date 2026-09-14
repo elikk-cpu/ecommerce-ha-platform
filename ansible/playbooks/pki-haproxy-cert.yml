@@ -1,0 +1,82 @@
+---
+- name: Issue HAProxy VIP HTTPS certificate
+  hosts: bastion
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Generate HAProxy private key
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - genrsa
+          - -out
+          - /etc/ecommerce-pki/private/haproxy-vip.key
+          - "4096"
+      args:
+        creates: /etc/ecommerce-pki/private/haproxy-vip.key
+      no_log: true
+
+    - name: Protect HAProxy private key
+      ansible.builtin.file:
+        path: /etc/ecommerce-pki/private/haproxy-vip.key
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Generate HAProxy CSR
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - req
+          - -new
+          - -key
+          - /etc/ecommerce-pki/private/haproxy-vip.key
+          - -out
+          - /etc/ecommerce-pki/csr/haproxy-vip.csr
+          - -subj
+          - /O=Ecommerce HA Platform/OU=Load Balancing/CN=ecommerce.ecom.test
+      args:
+        creates: /etc/ecommerce-pki/csr/haproxy-vip.csr
+
+    - name: Create HAProxy certificate extensions
+      ansible.builtin.copy:
+        dest: /etc/ecommerce-pki/csr/haproxy-vip.ext
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          basicConstraints=critical,CA:FALSE
+          keyUsage=critical,digitalSignature,keyEncipherment
+          extendedKeyUsage=serverAuth
+          subjectAltName=DNS:ecommerce.ecom.test,IP:10.20.20.100
+
+    - name: Sign HAProxy certificate with Ecommerce Root CA
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -req
+          - -in
+          - /etc/ecommerce-pki/csr/haproxy-vip.csr
+          - -CA
+          - /etc/ecommerce-pki/ca/ecommerce-root-ca.crt
+          - -CAkey
+          - /etc/ecommerce-pki/ca/ecommerce-root-ca.key
+          - -CAcreateserial
+          - -out
+          - /etc/ecommerce-pki/issued/haproxy-vip.crt
+          - -days
+          - "825"
+          - -sha256
+          - -extfile
+          - /etc/ecommerce-pki/csr/haproxy-vip.ext
+      args:
+        creates: /etc/ecommerce-pki/issued/haproxy-vip.crt
+
+    - name: Set HAProxy certificate permissions
+      ansible.builtin.file:
+        path: /etc/ecommerce-pki/issued/haproxy-vip.crt
+        owner: root
+        group: root
+        mode: "0644"
