@@ -1,0 +1,188 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # ВАЖНО:
+    # self-hosted runner запускаем только после успешного CI
+    # именно от push в main. PR сюда не допускаем.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - ecommerce-cd
+
+    timeout-minutes: 15
+
+    env:
+      SSH_KEY: /home/aa/.ssh/ecommerce-cd-ed25519
+      INVENTORY: ansible/inventory/hosts.ini
+      DEPLOY_PLAYBOOK: ansible/playbooks/cd-deploy.yml
+      IMAGE_REPOSITORY: ghcr.io/elikk-cpu/ecommerce-api
+
+    steps:
+      - name: Checkout deployed commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Prepare deployment variables
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          SHA="${{ github.event.workflow_run.head_sha }}"
+          TARGET_IMAGE="${IMAGE_REPOSITORY}:${SHA}"
+
+          echo "TARGET_IMAGE=${TARGET_IMAGE}" >> "${GITHUB_ENV}"
+
+          echo "Commit: ${SHA}"
+          echo "Target image: ${TARGET_IMAGE}"
+
+      - name: Verify runner prerequisites
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          ansible --version
+          test -f "${SSH_KEY}"
+          test -f "${INVENTORY}"
+          test -f "${DEPLOY_PLAYBOOK}"
+
+          curl -fsSk \
+            --max-time 5 \
+            https://10.20.20.100/ready \
+            | jq .
+
+      - name: Determine current production image
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          APP1_IMAGE="$(
+            ssh \
+              -i "${SSH_KEY}" \
+              -o BatchMode=yes \
+              aa@10.10.10.21 \
+              "docker inspect ecommerce-api --format '{{.Config.Image}}'"
+          )"
+
+          APP2_IMAGE="$(
+            ssh \
+              -i "${SSH_KEY}" \
+              -o BatchMode=yes \
+              aa@10.10.10.22 \
+              "docker inspect ecommerce-api --format '{{.Config.Image}}'"
+          )"
+
+          echo "app1 image: ${APP1_IMAGE}"
+          echo "app2 image: ${APP2_IMAGE}"
+
+          if [[ "${APP1_IMAGE}" != "${APP2_IMAGE}" ]]; then
+            echo "ERROR: application nodes are running different images"
+            exit 1
+          fi
+
+          echo "PREVIOUS_IMAGE=${APP1_IMAGE}" >> "${GITHUB_ENV}"
+
+      - name: Rolling deploy app2 then app1
+        shell: bash
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "True"
+        run: |
+          set -Eeuo pipefail
+
+          ansible-playbook \
+            -i "${INVENTORY}" \
+            "${DEPLOY_PLAYBOOK}" \
+            -e "deploy_image=${TARGET_IMAGE}" \
+            -e "ansible_ssh_private_key_file=${SSH_KEY}"
+
+      - name: Validate deployed image on both nodes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          for HOST in 10.10.10.21 10.10.10.22; do
+            ACTUAL_IMAGE="$(
+              ssh \
+                -i "${SSH_KEY}" \
+                -o BatchMode=yes \
+                aa@"${HOST}" \
+                "docker inspect ecommerce-api --format '{{.Config.Image}}'"
+            )"
+
+            echo "${HOST}: ${ACTUAL_IMAGE}"
+
+            if [[ "${ACTUAL_IMAGE}" != "${TARGET_IMAGE}" ]]; then
+              echo "ERROR: ${HOST} is not running target image"
+              exit 1
+            fi
+          done
+
+      - name: Final VIP readiness check
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          RESPONSE="$(
+            curl -fsSk \
+              --max-time 10 \
+              https://10.20.20.100/ready
+          )"
+
+          echo "${RESPONSE}" | jq .
+
+          echo "${RESPONSE}" | jq -e '
+            .status == "ready"
+            and .checks.postgresql == true
+            and .checks.redis == true
+            and .checks.rabbitmq == true
+            and .checks.minio == true
+          '
+
+      - name: Automatic rollback
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "True"
+        run: |
+          set -Eeuo pipefail
+
+          if [[ -z "${PREVIOUS_IMAGE:-}" ]]; then
+            echo "No previous image was captured."
+            echo "Rollback cannot be performed automatically."
+            exit 1
+          fi
+
+          echo "======================================"
+          echo "AUTOMATIC ROLLBACK"
+          echo "Target: ${PREVIOUS_IMAGE}"
+          echo "======================================"
+
+          ansible-playbook \
+            -i "${INVENTORY}" \
+            "${DEPLOY_PLAYBOOK}" \
+            -e "deploy_image=${PREVIOUS_IMAGE}" \
+            -e "ansible_ssh_private_key_file=${SSH_KEY}"
+
+          echo
+          echo "ROLLBACK COMPLETED"

@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+NEW_IMAGE="${1:-}"
+
+if [[ -z "${NEW_IMAGE}" ]]; then
+    echo "Usage: ecommerce-deploy ghcr.io/elikk-cpu/ecommerce-api:<tag>"
+    exit 2
+fi
+
+if [[ ! "${NEW_IMAGE}" =~ ^ghcr\.io/elikk-cpu/ecommerce-api:[A-Za-z0-9._-]+$ ]]; then
+    echo "ERROR: image must be ghcr.io/elikk-cpu/ecommerce-api:<tag>"
+    exit 2
+fi
+
+HOST="$(hostname -s)"
+CONTAINER="ecommerce-api"
+STATE_DIR="/var/lib/ecommerce-deploy"
+
+case "${HOST}" in
+    app1)
+        APP_IP="10.30.30.21"
+        MGMT_IP="10.10.10.21"
+        ;;
+    app2)
+        APP_IP="10.30.30.22"
+        MGMT_IP="10.10.10.22"
+        ;;
+    *)
+        echo "ERROR: unsupported host ${HOST}"
+        exit 3
+        ;;
+esac
+
+mkdir -p "${STATE_DIR}"
+
+CURRENT_IMAGE="$(
+    docker inspect "${CONTAINER}" \
+        --format '{{.Config.Image}}' \
+        2>/dev/null || true
+)"
+
+if [[ -z "${CURRENT_IMAGE}" ]]; then
+    echo "ERROR: current ecommerce-api container not found"
+    exit 4
+fi
+
+run_container() {
+    local image="$1"
+
+    docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+
+    docker run -d \
+        --name "${CONTAINER}" \
+        --hostname "${HOST}" \
+        --restart unless-stopped \
+        -p "${APP_IP}:8000:8000" \
+        -p "${MGMT_IP}:9101:8000" \
+        --env-file /etc/ecommerce/app.env \
+        -e APP_ENV=production \
+        -v /etc/ecommerce-pki/ecommerce-root-ca.crt:/etc/ecommerce-pki/ecommerce-root-ca.crt:ro \
+        "${image}" >/dev/null
+}
+
+wait_ready() {
+    local attempt
+    local ready
+
+    for attempt in $(seq 1 30); do
+        if curl -fsS \
+            --max-time 3 \
+            "http://${APP_IP}:8000/health" >/dev/null 2>&1; then
+
+            ready="$(
+                curl -fsS \
+                    --max-time 5 \
+                    "http://${APP_IP}:8000/ready" \
+                    2>/dev/null || true
+            )"
+
+            if grep -q '"status":"ready"' <<<"${ready}"; then
+                return 0
+            fi
+        fi
+
+        sleep 2
+    done
+
+    return 1
+}
+
+echo "=== DEPLOY ==="
+echo "host=${HOST}"
+echo "current=${CURRENT_IMAGE}"
+echo "new=${NEW_IMAGE}"
+
+echo
+echo "=== PULL IMAGE ==="
+
+# Pull happens before touching the running container.
+docker pull "${NEW_IMAGE}"
+
+echo
+echo "=== START NEW VERSION ==="
+
+run_container "${NEW_IMAGE}"
+
+if wait_ready; then
+    printf '%s\n' "${CURRENT_IMAGE}" > "${STATE_DIR}/previous-image"
+    printf '%s\n' "${NEW_IMAGE}" > "${STATE_DIR}/current-image"
+
+    echo
+    echo "DEPLOY VALIDATION: PASS"
+    echo "image=${NEW_IMAGE}"
+    exit 0
+fi
+
+echo
+echo "DEPLOY VALIDATION: FAIL"
+echo "Rolling back to ${CURRENT_IMAGE}"
+
+docker logs --tail 30 "${CONTAINER}" 2>&1 || true
+
+echo
+echo "=== AUTOMATIC ROLLBACK ==="
+
+run_container "${CURRENT_IMAGE}"
+
+if wait_ready; then
+    echo "ROLLBACK VALIDATION: PASS"
+    exit 1
+fi
+
+echo "ROLLBACK VALIDATION: FAIL"
+exit 90

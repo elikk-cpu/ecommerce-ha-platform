@@ -1,0 +1,52 @@
+---
+- name: Rolling deployment of ecommerce API
+  hosts: apps
+  gather_facts: false
+
+  # hosts.ini содержит app1, затем app2.
+  # Нам нужен порядок app2 -> app1.
+  order: reverse_inventory
+  serial: 1
+  any_errors_fatal: true
+
+  tasks:
+    - name: Validate deploy image variable
+      ansible.builtin.assert:
+        that:
+          - deploy_image is defined
+          - deploy_image is match('^ghcr\\.io/elikk-cpu/ecommerce-api:[A-Za-z0-9._-]+$')
+        fail_msg: "deploy_image is missing or invalid"
+
+    - name: Deploy application image
+      ansible.builtin.command:
+        argv:
+          - sudo
+          - -n
+          - /usr/local/sbin/ecommerce-deploy
+          - "{{ deploy_image }}"
+      register: deploy_result
+      changed_when: true
+
+    - name: Show deployment result
+      ansible.builtin.debug:
+        var: deploy_result.stdout_lines
+
+    - name: Verify VIP after deployment of this node
+      ansible.builtin.uri:
+        url: https://10.20.20.100/ready
+        method: GET
+        validate_certs: false
+        return_content: true
+        status_code: 200
+      delegate_to: localhost
+      register: vip_ready
+
+    - name: Validate platform readiness
+      ansible.builtin.assert:
+        that:
+          - vip_ready.json.status == "ready"
+          - vip_ready.json.checks.postgresql | bool
+          - vip_ready.json.checks.redis | bool
+          - vip_ready.json.checks.rabbitmq | bool
+          - vip_ready.json.checks.minio | bool
+        fail_msg: "VIP readiness validation failed"

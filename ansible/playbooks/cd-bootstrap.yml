@@ -1,0 +1,32 @@
+---
+- name: Prepare application nodes for controlled CD
+  hosts: apps
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Install ecommerce deployment script
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../files/ecommerce-deploy"
+        dest: /usr/local/sbin/ecommerce-deploy
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create deployment state directory
+      ansible.builtin.file:
+        path: /var/lib/ecommerce-deploy
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Allow CI user to execute only ecommerce deploy script
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/ecommerce-cd
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "/usr/sbin/visudo -cf %s"
+        content: |
+          aa ALL=(root) NOPASSWD: /usr/local/sbin/ecommerce-deploy *
