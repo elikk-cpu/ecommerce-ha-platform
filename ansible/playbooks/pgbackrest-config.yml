@@ -1,0 +1,27 @@
+---
+- name: Configure pgBackRest S3 repository
+  hosts: "db1:db2"
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../vars/backup-vault.yml
+
+  tasks:
+    - name: Create pgBackRest configuration directory
+      ansible.builtin.file:
+        path: /etc/pgbackrest
+        state: directory
+        owner: root
+        group: postgres
+        mode: "0750"
+
+    - name: Deploy pgBackRest configuration
+      ansible.builtin.template:
+        src: ../templates/pgbackrest.conf.j2
+        dest: /etc/pgbackrest/pgbackrest.conf
+        owner: root
+        group: postgres
+        mode: "0640"
+      no_log: true
+      diff: false

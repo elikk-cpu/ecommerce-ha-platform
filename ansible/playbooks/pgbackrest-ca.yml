@@ -1,0 +1,26 @@
+---
+- name: Read Ecommerce Root CA
+  hosts: bastion
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Read Root CA
+      ansible.builtin.slurp:
+        src: /etc/ecommerce-pki/ca/ecommerce-root-ca.crt
+      register: ecommerce_root_ca
+
+
+- name: Deploy Ecommerce Root CA for pgBackRest
+  hosts: "db1:db2"
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Deploy Root CA
+      ansible.builtin.copy:
+        content: "{{ hostvars['bastion']['ecommerce_root_ca']['content'] | b64decode }}"
+        dest: /etc/pgbackrest/ecommerce-root-ca.crt
+        owner: root
+        group: postgres
+        mode: "0640"

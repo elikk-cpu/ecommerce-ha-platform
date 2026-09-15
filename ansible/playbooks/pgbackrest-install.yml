@@ -1,0 +1,13 @@
+---
+- name: Install pgBackRest
+  hosts: "db1:db2"
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Install pgBackRest package
+      ansible.builtin.apt:
+        name: pgbackrest
+        state: present
+        update_cache: true
+        cache_valid_time: 3600

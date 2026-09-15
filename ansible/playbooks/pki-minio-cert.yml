@@ -1,0 +1,82 @@
+---
+- name: Issue MinIO TLS certificate
+  hosts: bastion
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Generate MinIO private key
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - genrsa
+          - -out
+          - /etc/ecommerce-pki/private/minio.key
+          - "4096"
+      args:
+        creates: /etc/ecommerce-pki/private/minio.key
+      no_log: true
+
+    - name: Protect MinIO private key
+      ansible.builtin.file:
+        path: /etc/ecommerce-pki/private/minio.key
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Generate MinIO CSR
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - req
+          - -new
+          - -key
+          - /etc/ecommerce-pki/private/minio.key
+          - -out
+          - /etc/ecommerce-pki/csr/minio.csr
+          - -subj
+          - /O=Ecommerce HA Platform/OU=Storage/CN=minio.ecom.test
+      args:
+        creates: /etc/ecommerce-pki/csr/minio.csr
+
+    - name: Create MinIO certificate extensions
+      ansible.builtin.copy:
+        dest: /etc/ecommerce-pki/csr/minio.ext
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          basicConstraints=critical,CA:FALSE
+          keyUsage=critical,digitalSignature,keyEncipherment
+          extendedKeyUsage=serverAuth
+          subjectAltName=DNS:minio,DNS:minio.ecom.test,IP:10.40.40.61,IP:10.10.10.61
+
+    - name: Sign MinIO certificate with Ecommerce Root CA
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -req
+          - -in
+          - /etc/ecommerce-pki/csr/minio.csr
+          - -CA
+          - /etc/ecommerce-pki/ca/ecommerce-root-ca.crt
+          - -CAkey
+          - /etc/ecommerce-pki/ca/ecommerce-root-ca.key
+          - -CAcreateserial
+          - -out
+          - /etc/ecommerce-pki/issued/minio.crt
+          - -days
+          - "825"
+          - -sha256
+          - -extfile
+          - /etc/ecommerce-pki/csr/minio.ext
+      args:
+        creates: /etc/ecommerce-pki/issued/minio.crt
+
+    - name: Set MinIO certificate permissions
+      ansible.builtin.file:
+        path: /etc/ecommerce-pki/issued/minio.crt
+        owner: root
+        group: root
+        mode: "0644"

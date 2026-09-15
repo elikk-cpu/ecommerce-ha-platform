@@ -1,0 +1,62 @@
+---
+- name: Read MinIO TLS files from bastion
+  hosts: bastion
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Read MinIO certificate
+      ansible.builtin.slurp:
+        src: /etc/ecommerce-pki/issued/minio.crt
+      register: minio_cert
+
+    - name: Read MinIO private key
+      ansible.builtin.slurp:
+        src: /etc/ecommerce-pki/private/minio.key
+      register: minio_key
+      no_log: true
+
+    - name: Read Ecommerce Root CA
+      ansible.builtin.slurp:
+        src: /etc/ecommerce-pki/ca/ecommerce-root-ca.crt
+      register: ecommerce_ca
+
+
+- name: Deploy MinIO TLS files
+  hosts: minio
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Create MinIO TLS directory
+      ansible.builtin.file:
+        path: /srv/minio/certs/CAs
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Deploy public certificate
+      ansible.builtin.copy:
+        content: "{{ hostvars['bastion']['minio_cert']['content'] | b64decode }}"
+        dest: /srv/minio/certs/public.crt
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Deploy private key
+      ansible.builtin.copy:
+        content: "{{ hostvars['bastion']['minio_key']['content'] | b64decode }}"
+        dest: /srv/minio/certs/private.key
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Deploy Root CA
+      ansible.builtin.copy:
+        content: "{{ hostvars['bastion']['ecommerce_ca']['content'] | b64decode }}"
+        dest: /srv/minio/certs/CAs/ecommerce-root-ca.crt
+        owner: root
+        group: root
+        mode: "0644"

@@ -1,0 +1,20 @@
+---
+- name: Configure PostgreSQL WAL archiving with pgBackRest
+  hosts: "db1:db2"
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Deploy pgBackRest WAL archive configuration
+      ansible.builtin.copy:
+        dest: /etc/postgresql/16/main/conf.d/20-pgbackrest.conf
+        owner: postgres
+        group: postgres
+        mode: "0644"
+        content: |
+          # Managed by Ansible
+          # PostgreSQL WAL archiving via pgBackRest
+
+          archive_mode = on
+          archive_command = 'pgbackrest --config=/etc/pgbackrest/pgbackrest.conf --stanza=ecommerce archive-push %p'
+          archive_timeout = '60s'

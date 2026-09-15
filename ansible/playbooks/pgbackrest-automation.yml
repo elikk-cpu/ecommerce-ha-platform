@@ -1,0 +1,121 @@
+---
+- name: Configure automated pgBackRest backups
+  hosts: "db1:db2"
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Install HA-aware backup wrapper
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/ecommerce-pgbackrest-backup
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          BACKUP_TYPE="${1:-}"
+
+          case "${BACKUP_TYPE}" in
+            full|diff)
+              ;;
+            *)
+              echo "ERROR: backup type must be full or diff"
+              exit 2
+              ;;
+          esac
+
+          if ! /usr/bin/pg_isready -q -p 5432; then
+            echo "$(date -Is) PostgreSQL is not ready"
+            exit 1
+          fi
+
+          IN_RECOVERY="$(
+            /usr/bin/psql \
+              -d postgres \
+              -Atqc "SELECT pg_is_in_recovery();"
+          )"
+
+          if [[ "${IN_RECOVERY}" == "t" ]]; then
+            echo "$(date -Is) role=STANDBY backup_type=${BACKUP_TYPE} action=SKIP"
+            exit 0
+          fi
+
+          echo "$(date -Is) role=PRIMARY backup_type=${BACKUP_TYPE} action=START"
+
+          exec /usr/bin/pgbackrest \
+            --config=/etc/pgbackrest/pgbackrest.conf \
+            --stanza=ecommerce \
+            --type="${BACKUP_TYPE}" \
+            backup
+
+    - name: Install backup service template
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ecommerce-pgbackrest-backup@.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Ecommerce pgBackRest %i backup
+          After=postgresql.service network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          User=postgres
+          Group=postgres
+          ExecStart=/usr/local/sbin/ecommerce-pgbackrest-backup %i
+
+    - name: Install weekly FULL timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ecommerce-pgbackrest-full.timer
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Weekly ecommerce PostgreSQL FULL backup
+
+          [Timer]
+          OnCalendar=Sun *-*-* 02:00:00
+          Persistent=true
+          Unit=ecommerce-pgbackrest-backup@full.service
+
+          [Install]
+          WantedBy=timers.target
+
+    - name: Install daily DIFF timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ecommerce-pgbackrest-diff.timer
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Daily ecommerce PostgreSQL DIFF backup
+
+          [Timer]
+          OnCalendar=Mon..Sat *-*-* 02:30:00
+          Persistent=true
+          Unit=ecommerce-pgbackrest-backup@diff.service
+
+          [Install]
+          WantedBy=timers.target
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable FULL backup timer
+      ansible.builtin.systemd:
+        name: ecommerce-pgbackrest-full.timer
+        enabled: true
+        state: started
+
+    - name: Enable DIFF backup timer
+      ansible.builtin.systemd:
+        name: ecommerce-pgbackrest-diff.timer
+        enabled: true
+        state: started

@@ -1,0 +1,150 @@
+---
+- name: Enable TLS on MinIO with rollback
+  hosts: minio
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check rollback container does not already exist
+      ansible.builtin.shell: |
+        if docker ps -a --format '{{ "{{" }}.Names{{ "}}" }}' | grep -qx 'minio-pre-stage17'; then
+          echo "exists"
+        else
+          echo "absent"
+        fi
+      register: rollback_container
+      changed_when: false
+
+    - name: Require clean rollback slot
+      ansible.builtin.assert:
+        that:
+          - rollback_container.stdout == "absent"
+        fail_msg: "Container minio-pre-stage17 already exists. Stop before continuing."
+
+    - name: Get current MinIO image ID
+      ansible.builtin.shell: |
+        docker inspect minio \
+          | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["Image"])'
+      register: minio_image
+      changed_when: false
+
+    - name: Read current MinIO root username
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - minio
+          - printenv
+          - MINIO_ROOT_USER
+      register: minio_root_user
+      changed_when: false
+      no_log: true
+
+    - name: Read current MinIO root password
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - minio
+          - printenv
+          - MINIO_ROOT_PASSWORD
+      register: minio_root_password
+      changed_when: false
+      no_log: true
+
+    - name: Perform MinIO TLS cutover
+      block:
+        - name: Stop current MinIO container
+          ansible.builtin.command:
+            argv:
+              - docker
+              - stop
+              - minio
+
+        - name: Preserve old MinIO container for rollback
+          ansible.builtin.command:
+            argv:
+              - docker
+              - rename
+              - minio
+              - minio-pre-stage17
+
+        - name: Start TLS-enabled MinIO container
+          ansible.builtin.command:
+            argv:
+              - docker
+              - run
+              - -d
+              - --name
+              - minio
+              - --hostname
+              - minio
+              - --restart
+              - unless-stopped
+              - -p
+              - 10.40.40.61:9000:9000
+              - -p
+              - 10.10.10.61:9001:9001
+              - -v
+              - /srv/minio/data:/data:rw
+              - -v
+              - /srv/minio/certs:/certs
+              - --env
+              - MINIO_ROOT_USER
+              - --env
+              - MINIO_ROOT_PASSWORD
+              - "{{ minio_image.stdout }}"
+              - server
+              - /data
+              - --address
+              - :9000
+              - --console-address
+              - :9001
+              - --certs-dir
+              - /certs
+          environment:
+            MINIO_ROOT_USER: "{{ minio_root_user.stdout }}"
+            MINIO_ROOT_PASSWORD: "{{ minio_root_password.stdout }}"
+          no_log: true
+
+        - name: Wait for MinIO TLS port
+          ansible.builtin.wait_for:
+            host: 10.40.40.61
+            port: 9000
+            delay: 3
+            timeout: 60
+
+        - name: Verify MinIO HTTPS health
+          ansible.builtin.uri:
+            url: https://10.40.40.61:9000/minio/health/live
+            method: GET
+            ca_path: /srv/minio/certs/CAs/ecommerce-root-ca.crt
+            status_code: 200
+          register: minio_https_health
+          retries: 6
+          delay: 5
+          until: minio_https_health.status == 200
+
+      rescue:
+        - name: Remove failed TLS MinIO container
+          ansible.builtin.shell: |
+            docker rm -f minio >/dev/null 2>&1 || true
+
+        - name: Restore old container name
+          ansible.builtin.command:
+            argv:
+              - docker
+              - rename
+              - minio-pre-stage17
+              - minio
+
+        - name: Restart old MinIO container
+          ansible.builtin.command:
+            argv:
+              - docker
+              - start
+              - minio
+
+        - name: Abort after rollback
+          ansible.builtin.fail:
+            msg: "TLS cutover failed. Original MinIO container was restored."

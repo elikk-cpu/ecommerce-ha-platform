@@ -1,0 +1,81 @@
+---
+- name: Configure MinIO repository for pgBackRest
+  hosts: minio
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../vars/backup-vault.yml
+
+  tasks:
+    - name: Copy pgBackRest MinIO policy
+      ansible.builtin.copy:
+        src: ../files/pgbackrest-minio-policy.json
+        dest: /tmp/pgbackrest-minio-policy.json
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Pull MinIO client image
+      ansible.builtin.command:
+        argv:
+          - docker
+          - pull
+          - quay.io/minio/mc:latest
+      register: mc_pull
+      changed_when: "'Downloaded newer image' in mc_pull.stdout"
+
+    - name: Create bucket, service user and bucket policy
+      ansible.builtin.shell: |
+        set -euo pipefail
+
+        ROOT_USER="$(docker exec minio printenv MINIO_ROOT_USER)"
+        ROOT_PASS="$(docker exec minio printenv MINIO_ROOT_PASSWORD)"
+
+        docker run --rm \
+          --network host \
+          -e ROOT_USER="$ROOT_USER" \
+          -e ROOT_PASS="$ROOT_PASS" \
+          -e BACKUP_USER="{{ vault_pgbackrest_s3_access_key }}" \
+          -e BACKUP_PASS="{{ vault_pgbackrest_s3_secret_key }}" \
+          -v /tmp/pgbackrest-minio-policy.json:/policy.json:ro \
+          --entrypoint /bin/sh \
+          quay.io/minio/mc:latest \
+          -c '
+            set -e
+
+            mc alias set repo \
+              http://10.40.40.61:9000 \
+              "$ROOT_USER" \
+              "$ROOT_PASS" >/dev/null
+
+            mc mb --ignore-existing \
+              repo/ecommerce-pgbackrest
+
+            if ! mc admin user info repo "$BACKUP_USER" >/dev/null 2>&1; then
+              mc admin user add \
+                repo \
+                "$BACKUP_USER" \
+                "$BACKUP_PASS"
+            fi
+
+            if ! mc admin policy info repo pgbackrest-policy >/dev/null 2>&1; then
+              mc admin policy create \
+                repo \
+                pgbackrest-policy \
+                /policy.json
+            fi
+
+            mc admin policy attach \
+              repo \
+              pgbackrest-policy \
+              --user "$BACKUP_USER"
+          '
+      args:
+        executable: /bin/bash
+      no_log: true
+
+    - name: Remove temporary policy
+      ansible.builtin.file:
+        path: /tmp/pgbackrest-minio-policy.json
+        state: absent

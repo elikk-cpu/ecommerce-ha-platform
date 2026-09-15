@@ -27,3 +27,4 @@ ansible/vars/rabbitmq-vault.yml
 ansible/vars/minio-vault.yml
 ansible/vars/zabbix-vault.yml
 ansible/vars/opensearch-vault.yml
+ansible/vars/backup-vault.yml
