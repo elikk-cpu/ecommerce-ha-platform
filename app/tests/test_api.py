@@ -91,3 +91,4 @@ def test_checkout_dependency_failure(monkeypatch):
     )
 
     assert response.status_code == 503
+import os
