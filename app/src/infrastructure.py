@@ -5,7 +5,6 @@ import pika
 import psycopg
 from redis.sentinel import Sentinel
 
-
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "db-primary.ecom.test")
 POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
 POSTGRES_DB = os.getenv("POSTGRES_DB", "ecommerce")
@@ -41,7 +40,7 @@ RABBITMQ_VHOST = os.getenv("RABBITMQ_VHOST", "/ecommerce")
 
 MINIO_ENDPOINT = os.getenv(
     "MINIO_ENDPOINT",
-    "http://10.40.40.61:9000",
+    "https://minio.ecom.test:9000",
 )
 
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "")

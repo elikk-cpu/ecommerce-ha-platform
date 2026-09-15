@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -61,7 +61,7 @@ def process_checkout(customer: str, amount: Decimal) -> dict:
     ensure_orders_table()
 
     order_id = str(uuid4())
-    created_at = datetime.now(timezone.utc)
+    created_at = datetime.now(UTC)
     amount_text = f"{amount:.2f}"
 
     connection = get_postgres_connection()

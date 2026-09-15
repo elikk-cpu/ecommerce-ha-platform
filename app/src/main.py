@@ -4,12 +4,12 @@ from decimal import Decimal
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
 from prometheus_client import (
+    CONTENT_TYPE_LATEST,
     Counter,
     generate_latest,
-    CONTENT_TYPE_LATEST,
 )
+from pydantic import BaseModel, Field
 
 from src.checkout import process_checkout
 from src.infrastructure import (
@@ -19,7 +19,6 @@ from src.infrastructure import (
     get_rabbitmq_connection,
     get_redis,
 )
-
 
 app = FastAPI(
     title="Ecommerce HA Platform",
@@ -177,8 +176,7 @@ def checkout(request: CheckoutRequest):
         raise HTTPException(
             status_code=503,
             detail="Checkout dependency failure",
-        )
-
+        ) from None
 
 @app.get("/metrics")
 def metrics():

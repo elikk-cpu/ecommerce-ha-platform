@@ -24,5 +24,8 @@
 
     env_file: /etc/ecommerce/app.env
 
+    volumes:
+      - /etc/ecommerce-pki/ecommerce-root-ca.crt:/etc/ecommerce-pki/ecommerce-root-ca.crt:ro
+
     env:
       APP_ENV: production

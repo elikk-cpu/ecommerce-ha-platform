@@ -15,6 +15,23 @@
     group: root
     mode: "0750"
 
+- name: Create application PKI directory
+  ansible.builtin.file:
+    path: /etc/ecommerce-pki
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy Ecommerce Root CA
+  ansible.builtin.copy:
+    src: ecommerce-root-ca.crt
+    dest: /etc/ecommerce-pki/ecommerce-root-ca.crt
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart application
+
 - name: Deploy ecommerce application environment
   ansible.builtin.template:
     src: app.env.j2
@@ -60,6 +77,9 @@
 
     env:
       APP_ENV: production
+
+    volumes:
+      - /etc/ecommerce-pki/ecommerce-root-ca.crt:/etc/ecommerce-pki/ecommerce-root-ca.crt:ro
 
 - name: Wait for application health endpoint
   ansible.builtin.uri:
